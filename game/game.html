@@ -1619,7 +1619,7 @@ function loop(now){requestAnimationFrame(loop);const rdt=Math.min(.05,(now-last)
   if(b.fall){const g0=gh(b.x,b.z,b.y),hi=b.y-g0>55,ex=b.fall.tx-b.x,ez=b.fall.tz-b.z,el=Math.hypot(ex,ez)||1,hs=hi?16:10;if(el>1){b.x+=ex/el*hs*dt;b.z+=ez/el*hs*dt}b.y-=(hi?40:9)*dt;
    if(!b.gl){b.gl=mkGlider(bots.indexOf(b)%GL.length);b.o.g.add(b.gl)}b.gl.visible=!hi;b.o.g.position.set(b.x,b.y,b.z);b.o.g.rotation.y=Math.atan2(ex,ez)+Math.PI;anim(b.o,T+b.x,0,hi?'sky':'glide');
    if(b.y<=g0){b.y=g0;b.fall=null;b.gl.visible=false;b.wt=0;b.o.aR.el.rotation.x=0}continue}
-  if(PH!='play'){if(Math.hypot(b.wx-b.x,b.wz-b.z)<1.5||!b.wx){b.wx=SPAWN.x+R(-32,32);b.wz=SPAWN.z+R(-32,32)}const ex=b.wx-b.x,ez=b.wz-b.z,el=Math.hypot(ex,ez)||1;b.x+=ex/el*3.6*dt;b.z+=ez/el*3.6*dt;const bp={x:b.x,z:b.z};push(bp,b.y||0);b.x=bp.x;b.z=bp.z;b.y=gh(b.x,b.z,b.y||0);b.o.g.position.set(b.x,b.y,b.z);b.o.g.rotation.y=Math.atan2(ex,ez)+Math.PI;anim(b.o,T+b.x,.7);continue}
+  if(PH!='play'){if(Math.hypot(b.wx-b.x,b.wz-b.z)<1.5||!b.wx){b.wx=SPAWN.x+R(-32,32);b.wz=SPAWN.z+R(-32,32)}const ex=b.wx-b.x,ez=b.wz-b.z,el=Math.hypot(ex,ez)||1;b.stW=(b.stW||0)+dt;if(b.stW>1.5){b.stW=0;const _k=b.stk||0;botStuckTick(b,el>1.5,false,b.wx,b.wz);if((b.stk||0)>_k){b.wx=SPAWN.x+R(-32,32);b.wz=SPAWN.z+R(-32,32)}}b.x+=ex/el*3.6*dt;b.z+=ez/el*3.6*dt;const bp={x:b.x,z:b.z};push(bp,b.y||0);b.x=bp.x;b.z=bp.z;b.y=gh(b.x,b.z,b.y||0);b.o.g.position.set(b.x,b.y,b.z);b.o.g.rotation.y=Math.atan2(ex,ez)+Math.PI;anim(b.o,T+b.x,.7);continue}
   const dx=P.x-b.x,dz=P.z-b.z,d=Math.hypot(dx,dz);
   const bdc=Math.hypot(b.x-cx0,b.z-cz0),rFut=stormR(T+25)[0],safe=Math.max(5,Math.min(r,rFut)-7),inStorm=bdc>r,rush=bdc>r-3,needMove=bdc>safe;
   const pickIn=()=>{const a=Math.random()*6.283,rr=Math.sqrt(Math.random())*safe*.8;b.wx=cx0+Math.cos(a)*rr;b.wz=cz0+Math.sin(a)*rr};
@@ -1627,7 +1627,7 @@ function loop(now){requestAnimationFrame(loop);const rdt=Math.min(.05,(now-last)
   if(Math.hypot(b.wx-cx0,b.wz-cz0)>safe)pickIn();
   let tx=b.wx,tz=b.wz,s=4;if(needMove){const k=safe*.55/(bdc||1);tx=cx0+(b.x-cx0)*k;tz=cz0+(b.z-cz0)*k;s=inStorm?7:5.5}
   // unstick: if a bot heading to zone barely moves, detour sideways for a moment
-  b.stT=(b.stT||0)+dt;if(b.stT>1.5){b.stT=0;if(needMove&&b.lx!==undefined&&Math.hypot(b.x-b.lx,b.z-b.lz)<1.2){const ex0=tx-b.x,ez0=tz-b.z,l0=Math.hypot(ex0,ez0)||1,sd=Math.random()<.5?1:-1;b.det={x:b.x+(-ez0/l0)*sd*9+ex0/l0*3,z:b.z+(ex0/l0)*sd*9+ez0/l0*3,t:1.4}}b.lx=b.x;b.lz=b.z}
+  b.stT=(b.stT||0)+dt;if(b.stT>1.5){b.stT=0;botStuckTick(b,(b._s||0)>.5||needMove,!!b.tgt||(d<55&&!dead&&P.mode=='ground'),tx,tz)}
   if(b.det){b.det.t-=dt;if(b.det.t<=0)b.det=null;else{tx=b.det.x;tz=b.det.z;s=Math.max(s,5.5)}}
   // storm hurts bots too
   if(inStorm){b.sdt=(b.sdt||0)+dt;if(b.sdt>1){b.sdt=0;b.hp-=1+si;b.hb=performance.now();if(b.hp<=0&&!b.dead){b.dead=true;bPlace(b);b.td=T;scene.remove(b.o.g);if(b.bar)scene.remove(b.bar);MPX.feedAll((b.nm||'A player')+' was eliminated by the storm');continue}}}else b.sdt=0;
@@ -1643,7 +1643,7 @@ function loop(now){requestAnimationFrame(loop);const rdt=Math.min(.05,(now-last)
   if(b.tm>0&&!useB&&!seen){const L=teamLead(b.tm);if(L&&L!==b&&L.tgt&&!L.tgt.dead){const o=L.tgt;if(o!==b&&Math.hypot(o.x-b.x,o.z-b.z)<40){tx=o.x;tz=o.z;s=4.5}}}
   b.tgt=useB?ob:null;
   if(b.tm===0&&!useB&&!needMove&&!dead){const k=bots.indexOf(b),fx_=P.x+Math.cos(k*2.1)*3.2,fz_=P.z+Math.sin(k*2.1)*3.2,fd=Math.hypot(fx_-b.x,fz_-b.z);if(fd>2){tx=fx_;tz=fz_;s=fd>18?7:fd>6?5:3}else{tx=b.x;tz=b.z;s=0}}
-  const ex=tx-b.x,ez=tz-b.z,el=Math.hypot(ex,ez)||1;b.x+=ex/el*s*dt;b.z+=ez/el*s*dt;if((!seen&&!useB)||(rush&&el>.5))b.o.g.rotation.y=Math.atan2(ex,ez)+Math.PI;
+  const ex=tx-b.x,ez=tz-b.z,el=Math.hypot(ex,ez)||1;b._s=el>1.5?s:0;b.x+=ex/el*s*dt;b.z+=ez/el*s*dt;if((!seen&&!useB)||(rush&&el>.5))b.o.g.rotation.y=Math.atan2(ex,ez)+Math.PI;
   const bp={x:b.x,z:b.z};push(bp,b.y||0);b.x=bp.x;b.z=bp.z;b.y=gh(b.x,b.z,b.y||0);b.o.g.position.set(b.x,b.y,b.z);anim(b.o,T+b.x,.8);b.o.aR.rotation.set(-1.45,0,.05);b.o.aR.el.rotation.x=0;b.o.aL.rotation.set(-1.2,0,-.4);b.o.aL.el.rotation.x=-.55;barTick(b)}
  const left=bots.filter(b=>!b.dead).length;$('alive').textContent='👤 '+(left+(dead?0:1))+' left';
  if(!dead&&!won&&!winning&&enemiesLeft()==0){winning=true;winT=0;down=false;$('vr').classList.add('on')}
@@ -2170,6 +2170,28 @@ function rItem(){const q=Math.random(),rr=()=>{const x=Math.random();return x<.4
 const BN=['Kiwi','Ghost','Blaze','Nova','Viper','Echo','Rogue','Zed','Pixel','Storm','Rex','Luna','Hawk','Sage','Bolt'];bots.forEach((b,i)=>b.nm=BN[i%BN.length]+(i>=BN.length?i:''));
 function teamLead(t){for(const o of bots)if(o.tm===t&&!o.dead&&!o.gone)return o;return null}
 function bPlace(b){if(teamN()>1&&b.tm!==undefined){if(b.tm===0)return;if(bots.some(o=>o!==b&&o.tm===b.tm&&!o.dead&&!o.gone))return;const t=new Set(bots.filter(o=>o!==b&&!o.dead&&!o.gone&&o.tm>0).map(o=>o.tm));const pl=t.size+(dead&&!TMS.some(o=>!o.dead)?0:1)+1;bots.forEach(o=>{if(o.tm===b.tm&&!o.place)o.place=pl});return}if(!b.place)b.place=bots.filter(o=>!o.dead&&!o.gone).length+(dead?0:1)+1}
+// ---- bots: get unstuck (detour around, then teleport to open ground outside) ----
+function botIndoor(x,y,z){for(const c of cols){if(c.y0>y+1.9&&c.y0<y+14&&x>c.x0&&x<c.x1&&z>c.z0&&z<c.z1)return true}return false}
+function botOpen(x,z){if(Math.hypot(x,z)>isleR(Math.atan2(z,x))-6)return false;const y=gh(x,z,0);if(y>1.2)return false;
+ for(const c of cols){if(c.y1<y+.25||c.y0>y+2.6)continue;if(x>c.x0-.9&&x<c.x1+.9&&z>c.z0-.9&&z<c.z1+.9)return false}
+ if(botIndoor(x,y,z))return false;
+ for(const q of trees)if(q.g.visible&&Math.hypot(q.x-x,q.z-z)<1.6)return false;
+ const o=new THREE.Vector3(x,y+1,z);for(const d of [[1,0],[-1,0],[0,1],[0,-1]]){const dv=new THREE.Vector3(d[0],0,d[1]);let hit=false;for(const c of cols){if(c.y1<y+.5||c.y0>y+1.5)continue;if(rayBox(o,dv,8,c)>=0){hit=true;break}}if(!hit)return true}
+ return false}
+let BOT_UNSTUCK=0;
+function botUnstick(b){const a0=Math.random()*6.283;
+ for(const r of [3,5,8,11,15,20,26,34,44,56])for(let k=0;k<12;k++){const a=a0+k/12*6.283,x=b.x+Math.cos(a)*r,z=b.z+Math.sin(a)*r;if(!botOpen(x,z))continue;
+  const y=gh(x,z,0);if(b.o.g.visible&&Math.hypot(b.x-P.x,b.z-P.z)<80){try{dust(b.x,b.y||0,b.z,8,1);dust(x,y,z,8,1)}catch(e){}}
+  b.x=x;b.z=z;b.y=y;b.det=null;b.wx=x+R(-12,12);b.wz=z+R(-12,12);b.wt=R(2,4);b.hist=null;b.inT=0;b.stk=0;b.o.g.position.set(x,y,z);BOT_UNSTUCK++;return true}
+ return false}
+// called every 1.5 s per bot: mv = bot is trying to move, fight = busy fighting
+function botStuckTick(b,mv,fight,tx,tz){const y=b.y||0;
+ if(botIndoor(b.x,y,b.z))b.inT=(b.inT||0)+(fight?.75:1.5);else b.inT=0;
+ const h=b.hist||(b.hist=[]);h.push([b.x,b.z]);if(h.length>5)h.shift();
+ if(mv&&h.length==5&&Math.hypot(b.x-h[0][0],b.z-h[0][1])<4){b.stk=(b.stk||0)+1;b.hist=[];
+  if(b.stk<3){const ex0=tx-b.x,ez0=tz-b.z,l0=Math.hypot(ex0,ez0)||1,sd=b.stk%2?1:-1;b.det={x:b.x+(-ez0/l0)*sd*9+ex0/l0*3,z:b.z+(ex0/l0)*sd*9+ez0/l0*3,t:2}}}
+ else if(h.length==5)b.stk=0;
+ if((b.stk||0)>=3||b.inT>=9)botUnstick(b)}
 function botKill(v,k){k.k=(k.k||0)+1;v.dead=true;bPlace(v);scene.remove(v.o.g);if(v.bar)scene.remove(v.bar);feed(k.nm+' eliminated '+v.nm);const w=['ar','smg','sg','pi'][bots.indexOf(v)%4];drop(v.x,v.z,{t:'w',k:w,r:Math.random()<.2?2:Math.random()<.5?1:0,mag:WD[w].m});drop(v.x+1,v.z,{t:'a',a:WD[w].am,n:WD[w].am=='s'?6:30})}
 function kill(b){bPlace(b);sfx('elim');P.sc=(P.sc||0)+100;b.td=T;if(b.bar)scene.remove(b.bar);feed(S.name+' eliminated '+(b.nm||'a player'));S.vb+=50;save();feed('+50 V-Bucks');const w=['ar','smg','sg','pi'][bots.indexOf(b)%4];drop(b.x,b.z,{t:'w',k:w,r:Math.random()<.2?2:Math.random()<.5?1:0,mag:WD[w].m});drop(b.x+1,b.z,{t:'a',a:WD[w].am,n:WD[w].am=='s'?6:30})}
 function kit(){for(let i=1;i<5;i++)INV[i]=null;AM.l=AM.s=AM.h=0;rel=cons=0;consItem=null;if(S.mode=='Gear Up'){INV[1]={t:'w',k:'ar',r:3,mag:30};INV[2]={t:'w',k:'sg',r:2,mag:5};INV[3]={t:'w',k:'sn',r:2,mag:1};INV[4]={t:'c',k:'sp',n:3};AM.l=150;AM.s=20;AM.h=10}else{INV[1]={t:'w',k:'pi',r:0,mag:16};INV[2]={t:'c',k:'bd',n:3};AM.l=48}sel=1}

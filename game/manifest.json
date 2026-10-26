@@ -1,9 +1,9 @@
 {
- "v": 2,
+ "v": 3,
  "shell": 1,
- "notes": "Cup Jaxx bundle: new outfit, Bass Drop pickaxe, Soundwave glider, Jaxx Trophy back bling",
+ "notes": "Bots no longer get stuck in buildings: they walk around obstacles, and teleport out if trapped indoors or upstairs",
  "files": {
-  "game.html": "889674a7d0740612038b1b5fc084b83fc9996f82ff9ae69a8de6a073f523050d",
+  "game.html": "97870228b260ca8dbc597aba06968c99fb7f91587b2ea6b164d53b96387108db",
   "mp-pre.js": "be8c9b0b37af841a223c29263f12c785422234671280bb92ddd6dfc8b14e9821",
   "mp-game.js": "351dc28d1a90665f35e274313fc9df7805497fd552ed1dd1e54b2b0d2d16e6df",
   "three.min.js": "dd5fa76b8ab5df86918e8d767ba6ba8529a5880f26c456d973635133b135ac7d",
