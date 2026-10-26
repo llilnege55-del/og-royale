@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OG Royale Launcher</title>
+<style>
+:root{
+  --bg:#070b1f; --panel:#0e1534; --panel2:#141d45; --line:#223070; --text:#eef2ff; --mute:#8d99c8;
+  --yellow:#ffe600; --blue:#3fb6ff; --danger:#ff4d6d;
+  --hfont:"Segoe UI Black","Arial Black","Inter",system-ui,sans-serif;
+  --font:"Segoe UI","Inter",system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden;user-select:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+.app{display:grid;grid-template-columns:220px 1fr;grid-template-rows:38px 1fr;height:100%}
+
+/* title bar */
+.tb{grid-column:1/3;display:flex;align-items:center;background:#050817;border-bottom:1px solid #111a40;-webkit-app-region:drag}
+.tb .ttl{padding-left:14px;font-size:12px;letter-spacing:.14em;color:var(--mute);font-weight:700;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.tb .ttl img{width:18px;height:18px;border-radius:4px}
+.tb .sp{flex:1}
+.tb button{-webkit-app-region:no-drag;width:46px;height:38px;display:grid;place-items:center;color:#aab3d8}
+.tb button:hover{background:#18214a;color:#fff}
+.tb button.x:hover{background:#e81123}
+.tb svg{width:11px;height:11px}
+
+/* sidebar */
+.side{background:linear-gradient(180deg,#0a1030,#070b1f);border-right:1px solid #111a40;display:flex;flex-direction:column;padding:22px 14px}
+.brand{display:flex;align-items:center;gap:12px;padding:0 6px 26px}
+.brand img{width:48px;height:48px;border-radius:12px;box-shadow:0 6px 18px #0008}
+.brand b{font-family:var(--hfont);font-style:italic;font-size:21px;line-height:1;letter-spacing:.01em;text-transform:uppercase}
+.brand small{display:block;font-size:11px;color:var(--mute);margin-top:4px;letter-spacing:.12em;text-transform:uppercase;font-weight:700}
+.nav{display:flex;flex-direction:column;gap:4px}
+.nav button{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:10px;font-weight:700;font-size:14px;color:#b8c2ec;text-align:left}
+.nav button svg{width:18px;height:18px;flex:none}
+.nav button:hover{background:#121b44;color:#fff}
+.nav button.on{background:var(--yellow);color:#111}
+.side .foot{margin-top:auto;padding:12px;border-radius:12px;background:#0c1338;border:1px solid #17205a;font-size:12px;color:var(--mute);line-height:1.5}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2ee67a;margin-right:6px;box-shadow:0 0 8px #2ee67a}
+
+/* main */
+main{position:relative;overflow:auto}
+.page{display:none;padding:26px 30px 30px;min-height:100%}
+.page.on{display:block}
+h2{font-family:var(--hfont);font-style:italic;text-transform:uppercase;font-size:26px;margin-bottom:18px}
+
+.hero{position:relative;height:330px;border-radius:18px;overflow:hidden;background:#0b1440 url(hero.jpg) right center/auto 112% no-repeat;border:1px solid #1c2a6a;box-shadow:0 20px 50px #0007}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#0b1440 0%,#0b1440 38%,rgba(11,20,64,.7) 52%,rgba(11,20,64,0) 72%),linear-gradient(0deg,rgba(5,9,30,.6),transparent 40%)}
+.hero .in{position:absolute;z-index:1;left:34px;bottom:30px;max-width:440px}
+.tag{display:inline-block;background:var(--blue);color:#04142a;font-weight:800;font-size:11px;letter-spacing:.12em;padding:5px 9px;border-radius:5px;text-transform:uppercase}
+.hero h1{font-family:var(--hfont);font-style:italic;text-transform:uppercase;font-size:64px;line-height:.92;margin:14px 0 10px;text-shadow:0 4px 0 #000a}
+.hero h1 span{color:var(--yellow)}
+.hero p{color:#c7cff2;font-size:14px;line-height:1.5;margin-bottom:22px}
+.launch{display:inline-flex;align-items:center;gap:12px;background:var(--yellow);color:#111;font-family:var(--hfont);font-style:italic;text-transform:uppercase;font-size:26px;padding:14px 38px 14px 30px;border-radius:10px;box-shadow:0 6px 0 #b9a400,0 14px 30px #ffe60033;transition:transform .08s,filter .15s}
+.launch svg{width:24px;height:24px}
+.launch:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.launch:active{transform:translateY(4px);box-shadow:0 2px 0 #b9a400}
+.launch:disabled{background:#2b3466;color:#9aa5d6;box-shadow:0 6px 0 #1c2350;cursor:default;transform:none;filter:none}
+.hint{margin-top:14px;font-size:12px;color:var(--mute)}
+kbd{background:#1a2456;border:1px solid #2a377a;border-bottom-width:2px;border-radius:4px;padding:1px 6px;font-size:11px;color:#dfe5ff;font-family:var(--font)}
+
+.row{display:grid;grid-template-columns:1.1fr 1fr;gap:18px;margin-top:18px}
+.card{background:var(--panel);border:1px solid #1a2458;border-radius:16px;padding:20px}
+.card h3{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--mute);margin-bottom:14px}
+.prof{display:flex;align-items:center;gap:16px}
+.lvl{width:62px;height:62px;border-radius:50%;flex:none;display:grid;place-items:center;background:radial-gradient(circle at 35% 30%,#ffb347,#ff6a00);border:3px solid #fff;font-family:var(--hfont);font-style:italic;font-size:24px;color:#fff;text-shadow:0 2px 0 #0006}
+.prof .nm{font-family:var(--hfont);font-style:italic;font-size:22px;text-transform:uppercase}
+.bar{height:8px;background:#1b2560;border-radius:5px;margin:9px 0 6px;overflow:hidden;width:230px;max-width:100%}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),#8be0ff);border-radius:5px}
+.small{font-size:12px;color:var(--mute)}
+.mini{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}
+.mini div{background:var(--panel2);border-radius:10px;padding:10px 12px}
+.mini b{display:block;font-family:var(--hfont);font-style:italic;font-size:20px}
+.mini span{font-size:11px;color:var(--mute);text-transform:uppercase;letter-spacing:.1em;font-weight:700}
+.news{display:flex;flex-direction:column;gap:10px}
+.news div{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:var(--panel2)}
+.news em{flex:none;width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-style:normal;font-size:15px;background:#22306f}
+.news b{display:block;font-size:14px;margin-bottom:2px}
+.news p{font-size:12px;color:var(--mute);line-height:1.4}
+
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.stat{background:var(--panel);border:1px solid #1a2458;border-radius:16px;padding:22px}
+.stat b{display:block;font-family:var(--hfont);font-style:italic;font-size:40px;line-height:1.1}
+.stat span{font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.12em;font-weight:700}
+.stat.y b{color:var(--yellow)}
+
+.set{display:flex;flex-direction:column;gap:12px;max-width:640px}
+.opt{display:flex;align-items:center;gap:16px;background:var(--panel);border:1px solid #1a2458;border-radius:14px;padding:16px 18px}
+.opt .t{flex:1}
+.opt b{display:block;font-size:15px;margin-bottom:3px}
+.opt p{font-size:12px;color:var(--mute)}
+.sw{position:relative;width:46px;height:26px;border-radius:20px;background:#2a3470;flex:none;transition:background .15s}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .15s}
+.sw.on{background:var(--yellow)}
+.sw.on::after{left:23px}
+.btn{padding:9px 16px;border-radius:9px;font-weight:800;font-size:13px;background:#1d2862}
+.btn:hover{background:#26337a}
+.btn.red{background:var(--danger);color:#fff}
+.btn.red:hover{filter:brightness(1.1)}
+.on-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:860px}
+.on-card{background:var(--panel);border:1px solid #1a2458;border-radius:16px;padding:22px}
+.on-card h3{font-family:var(--hfont);font-style:italic;text-transform:uppercase;font-size:20px;margin-bottom:6px}
+.on-card p{font-size:13px;color:var(--mute);line-height:1.5;margin-bottom:16px}
+.ybtn{background:var(--yellow);color:#111;font-family:var(--hfont);font-style:italic;text-transform:uppercase;font-size:17px;padding:11px 22px;border-radius:9px;box-shadow:0 4px 0 #b9a400}
+.ybtn:active{transform:translateY(3px);box-shadow:0 1px 0 #b9a400}
+.ybtn:disabled{background:#2b3466;color:#9aa5d6;box-shadow:0 4px 0 #1c2350;cursor:default;transform:none}
+.inp{background:#0a1030;border:1px solid #26337a;border-radius:9px;color:#fff;font:inherit;font-size:15px;padding:10px 12px;outline:none;user-select:text}
+.inp:focus{border-color:var(--blue)}
+.codein{width:120px;text-transform:uppercase;letter-spacing:.3em;font-family:var(--hfont);font-size:20px;text-align:center}
+.jrow{display:flex;gap:10px;align-items:center}
+.namerow{display:flex;gap:12px;align-items:center;margin-bottom:18px;max-width:860px}
+.namerow label{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);font-weight:800}
+.namerow .inp{width:240px}
+.err{margin-top:14px;font-size:13px;color:#ff8fa3;min-height:18px;max-width:860px}
+.lob{display:grid;grid-template-columns:300px 1fr;gap:18px;max-width:860px}
+.codebox{background:linear-gradient(160deg,#1a2a7a,#0e1534);border:1px solid #2a3a8a;border-radius:16px;padding:22px;text-align:center}
+.codebox small{display:block;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#aab6ee;font-weight:800}
+.codebox b{display:block;font-family:var(--hfont);font-style:italic;font-size:54px;letter-spacing:.14em;color:var(--yellow);margin:8px 0 12px;user-select:text}
+.codebox p{font-size:12px;color:#aab6ee;line-height:1.5;margin-top:12px}
+.plist{display:flex;flex-direction:column;gap:8px}
+.prow{display:flex;align-items:center;gap:12px;background:var(--panel2);border-radius:10px;padding:10px 12px}
+.prow i{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-weight:900;color:#111;flex:none}
+.prow b{flex:1;font-size:15px}
+.prow span{font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:3px 7px;border-radius:5px;background:#26337a;color:#cfe0ff}
+.prow span.h{background:var(--yellow);color:#111}
+.prow em{font-style:normal;font-size:12px;color:var(--mute)}
+.lobact{display:flex;gap:10px;align-items:center;margin-top:16px;flex-wrap:wrap}
+.wait{font-size:13px;color:var(--mute);display:flex;align-items:center;gap:8px}
+.spin{width:14px;height:14px;border:2px solid #3a4aa0;border-top-color:var(--yellow);border-radius:50%;animation:sp 1s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.how{max-width:860px;margin-top:22px;font-size:12px;color:var(--mute);line-height:1.6}
+.ghostb{display:inline-flex;align-items:center;gap:8px;margin-left:10px;padding:13px 18px;border-radius:10px;font-weight:800;font-size:14px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18)}
+.ghostb:hover{background:rgba(255,255,255,.14)}
+.upd{margin-top:8px;padding-top:8px;border-top:1px solid #17205a;font-size:11px;color:var(--mute);line-height:1.5}
+.upd button{display:block;margin-top:6px;width:100%;padding:7px;border-radius:7px;background:var(--yellow);color:#111;font-weight:900;font-size:12px}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);opacity:0;background:var(--yellow);color:#111;font-weight:900;padding:10px 20px;border-radius:9px;transition:.2s;pointer-events:none}
+#toast.on{opacity:1;transform:translateX(-50%)}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="tb">
+    <div class="ttl"><img src="icon.png" alt="">OG Royale Launcher</div>
+    <div class="sp"></div>
+    <button title="Minimize" onclick="ogr.win('min')"><svg viewBox="0 0 11 11"><path d="M0 5.5h11" stroke="currentColor" stroke-width="1.2"/></svg></button>
+    <button title="Maximize" onclick="ogr.win('max')"><svg viewBox="0 0 11 11"><rect x=".6" y=".6" width="9.8" height="9.8" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></button>
+    <button class="x" title="Close" onclick="ogr.win('close')"><svg viewBox="0 0 11 11"><path d="M0 0l11 11M11 0L0 11" stroke="currentColor" stroke-width="1.2"/></svg></button>
+  </div>
+
+  <aside class="side">
+    <div class="brand"><img src="icon.png" alt=""><div><b>OG Royale</b><small>Launcher v1.3</small></div></div>
+    <nav class="nav">
+      <button data-p="home" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+      <button data-p="online"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.2c3 .2 5.5 2.6 5.5 5.8"/></svg>Play Online</button>
+      <button data-p="stats"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 20V10M12 20V4M19 20v-7"/></svg>Career</button>
+      <button data-p="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+    </nav>
+    <div class="foot"><span class="dot"></span><span id="status">Ready to play</span><br><span id="mode">Solo vs bots · or play online</span><div class="upd" id="upd"></div></div>
+  </aside>
+
+  <main>
+    <section class="page on" id="p-home">
+      <div class="hero">
+        <div class="in">
+          <span class="tag">Battle Royale</span>
+          <h1>OG <span>Royale</span></h1>
+          <p>Drop in, loot up and be the last one standing. Build, fight and climb the Battle Pass, all on your PC.</p>
+          <button class="launch" id="launch"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg><span>Launch</span></button><button class="ghostb" id="goOnline">Play with friends</button>
+          <div class="hint"><kbd>F11</kbd> toggles fullscreen in game · close the game window to come back here</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="card">
+          <h3>Your profile</h3>
+          <div class="prof">
+            <div class="lvl" id="lvl">1</div>
+            <div>
+              <div class="nm" id="nm">Player</div>
+              <div class="bar"><i id="xpbar" style="width:0%"></i></div>
+              <div class="small" id="xptxt">0 / 100 XP to next level</div>
+            </div>
+          </div>
+          <div class="mini">
+            <div><b id="m-wins">0</b><span>Wins</span></div>
+            <div><b id="m-elim">0</b><span>Elims</span></div>
+            <div><b id="m-vb">0</b><span>Balance</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>In the game</h3>
+          <div class="news">
+            <div><em>🪂</em><span><b>Solo or online</b><p>Fight 19 bots, or drop in with up to 7 friends.</p></span></div>
+            <div><em>🧢</em><span><b>Locker &amp; Item Shop</b><p>Unlock skins, emotes, gliders and cars.</p></span></div>
+            <div><em>🏆</em><span><b>Battle Pass &amp; Quests</b><p>Earn XP every match and level up.</p></span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="page" id="p-online">
+      <h2>Play Online</h2>
+      <div class="namerow"><label for="pname">Your name</label><input class="inp" id="pname" maxlength="24" spellcheck="false"></div>
+      <div id="on-start">
+        <div class="on-grid">
+          <div class="on-card"><h3>Host a lobby</h3><p>Get a 4-letter code and send it to your friends. You start the match when everyone's in.</p><button class="ybtn" id="hostBtn">Create lobby</button></div>
+          <div class="on-card"><h3>Join a lobby</h3><p>Got a code from a friend? Type it here.</p><div class="jrow"><input class="inp codein" id="codeIn" maxlength="4" placeholder="CODE" spellcheck="false"><button class="ybtn" id="joinBtn">Join</button></div></div>
+        </div>
+      </div>
+      <div id="on-lobby" style="display:none">
+        <div class="lob">
+          <div class="codebox"><small>Lobby code</small><b id="lcode">----</b><button class="btn" id="copyBtn">Copy code</button><p>Friends open OG Royale, go to <b style="display:inline;font-size:12px;letter-spacing:0;color:#fff;margin:0">Play Online</b> and join with this code.</p></div>
+          <div class="on-card"><h3 id="pcount">Players</h3><div class="plist" id="plist"></div>
+            <div class="lobact"><button class="ybtn" id="startBtn">Start match</button><div class="wait" id="waitTxt"><i class="spin"></i>Waiting for the host to start…</div><button class="btn" id="leaveBtn">Leave lobby</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="err" id="onErr"></div>
+      <p class="how">Up to 8 players per match. Empty spots are filled with bots. Your levels, skins and V-Bucks stay your own. If a friend can't connect, one of your networks (often school or work Wi-Fi) is probably blocking direct connections.</p>
+    </section>
+
+    <section class="page" id="p-stats">
+      <h2>Career</h2>
+      <div class="stats">
+        <div class="stat y"><b id="s-wins">0</b><span>Victory Royales</span></div>
+        <div class="stat"><b id="s-matches">0</b><span>Matches played</span></div>
+        <div class="stat"><b id="s-rate">0%</b><span>Win rate</span></div>
+        <div class="stat"><b id="s-elim">0</b><span>Eliminations</span></div>
+        <div class="stat"><b id="s-kpm">0</b><span>Elims per match</span></div>
+        <div class="stat"><b id="s-lvl">1</b><span>Level</span></div>
+      </div>
+    </section>
+
+    <section class="page" id="p-settings">
+      <h2>Settings</h2>
+      <div class="set">
+        <div class="opt"><div class="t"><b>Launch in fullscreen</b><p>Start the game fullscreen. Press F11 in game to switch any time.</p></div><button class="sw" data-k="fullscreen"></button></div>
+        <div class="opt"><div class="t"><b>Keep launcher open while playing</b><p>Otherwise the launcher hides and comes back when you close the game.</p></div><button class="sw" data-k="keepOpen"></button></div>
+        <div class="opt"><div class="t"><b>Reset progress</b><p id="rtxt">Wipes your level, wins, items and balance on this PC. This can't be undone.</p></div><button class="btn" id="reset">Reset</button></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div id="toast"></div>
+<script src="net.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const fmt=n=>Number(n||0).toLocaleString();
+const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+let cfg=Object.assign({fullscreen:true,keepOpen:false},load('ogrLauncher',{}));
+const saveCfg=()=>{try{localStorage.setItem('ogrLauncher',JSON.stringify(cfg))}catch(e){}};
+function toast(t){const el=$('toast');el.textContent=t;el.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('on'),1800)}
+
+function refresh(){
+  const S=load('ogr',{});
+  const xp=S.xp||0,lv=1+Math.floor(xp/100),into=xp%100;
+  const wins=S.wins||0,m=S.matches||0,el=Math.max(S.elim||0,S.kills||0);
+  $('nm').textContent=String(S.name||'Player').slice(0,24);
+  $('lvl').textContent=lv;$('s-lvl').textContent=lv;
+  $('xpbar').style.width=into+'%';$('xptxt').textContent=`${into} / 100 XP to level ${lv+1}`;
+  $('m-wins').textContent=fmt(wins);$('m-elim').textContent=fmt(el);$('m-vb').textContent=fmt(S.vb);
+  $('s-wins').textContent=fmt(wins);$('s-matches').textContent=fmt(m);$('s-elim').textContent=fmt(el);
+  $('s-rate').textContent=(m?Math.round(wins/m*100):0)+'%';
+  $('s-kpm').textContent=m?(el/m).toFixed(1):'0';
+}
+
+document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.page').forEach(p=>p.classList.toggle('on',p.id==='p-'+b.dataset.p));
+  refresh();
+});
+document.querySelectorAll('.sw').forEach(s=>{
+  s.classList.toggle('on',!!cfg[s.dataset.k]);
+  s.onclick=()=>{cfg[s.dataset.k]=!cfg[s.dataset.k];s.classList.toggle('on',cfg[s.dataset.k]);saveCfg()};
+});
+
+let armed=false;
+$('reset').onclick=()=>{
+  const b=$('reset');
+  if(!armed){armed=true;b.textContent='Click again to confirm';b.classList.add('red');setTimeout(()=>{armed=false;b.textContent='Reset';b.classList.remove('red')},4000);return}
+  try{localStorage.removeItem('ogr')}catch(e){}
+  armed=false;b.textContent='Reset';b.classList.remove('red');refresh();toast('Progress reset');
+};
+
+// ---------- online ----------
+const COLS=['#ffe600','#3fb6ff','#ff7eb9','#7dff9a','#ff9a3a','#b48cff','#5ff0e0','#ff5f6d'];
+const prof=()=>{const S=load('ogr',{});return{name:String(S.name||'Player').slice(0,24),skin:S.skin|0,bb:S.bb|0,gl:S.gl|0,lvl:1+Math.floor((S.xp||0)/100)}};
+NET.profile=prof;
+const ERR={offline:"Couldn't reach the online service. Check your internet connection and try again.",notfound:'No lobby with that code. Double-check it with your friend.',timeout:"Couldn't connect to that lobby. Try again in a moment.",noanswer:"Found no answer from that lobby. Make sure the host still has OG Royale open on the lobby screen (and the same version as you), then try again.",nat:"Reached the lobby but couldn't connect, even through the relay. A network (often school or work Wi-Fi) is blocking games like this. Try a different network, like a phone hotspot.",oldyou:"Your game is older than the host's. Close OG Royale and open it again so it updates, then rejoin.",oldhost:"The host's game is older than yours. Ask them to close OG Royale and open it again so it updates.",match:'That lobby is in a match right now. Try again when it ends.',full:'That lobby is full (8 players).',code:'Lobby codes are 4 letters or numbers.',taken:"Couldn't create a lobby right now. Try again."};
+const onErr=t=>{$('onErr').textContent=t||''};
+function showLobby(on){$('on-start').style.display=on?'none':'block';$('on-lobby').style.display=on?'block':'none';$('mode').textContent=on?'Online lobby '+NET.code:'Solo vs bots · or play online'}
+function drawLobby(){
+  const ps=NET.players||[],host=NET.role==='host';
+  $('lcode').textContent=NET.code||'----';
+  $('pcount').textContent='Players ('+ps.length+'/8)';
+  $('plist').innerHTML=ps.map((p,i)=>`<div class="prow"><i style="background:${COLS[i%COLS.length]}">${(p.name||'P')[0].toUpperCase()}</i><b></b>${p.id===NET.me?'<span>You</span>':''}${p.host?'<span class="h">Host</span>':''}<em>Lv ${p.lvl||1}</em></div>`).join('');
+  [...$('plist').querySelectorAll('.prow b')].forEach((b,i)=>b.textContent=ps[i].name||'Player');
+  $('startBtn').style.display=host?'':'none';$('waitTxt').style.display=host?'none':'flex';
+  $('startBtn').disabled=!!NET.inMatch||ingame;
+  $('startBtn').textContent=NET.inMatch?'Match in progress':'Start match';
+  if(!host)$('waitTxt').lastChild.textContent=NET.inMatch?'Match in progress…':'Waiting for the host to start…';
+}
+let ingame=false;
+$('pname').value=prof().name;
+$('pname').onchange=()=>{const v=$('pname').value.trim().slice(0,24)||'Player';$('pname').value=v;const S=load('ogr',{});S.name=v;try{localStorage.setItem('ogr',JSON.stringify(S))}catch(e){}refresh();NET.updateProfile();toast('Name saved')};
+$('goOnline').onclick=()=>document.querySelector('[data-p=online]').click();
+$('hostBtn').onclick=async()=>{onErr('');$('hostBtn').disabled=true;$('hostBtn').textContent='Creating…';
+  try{await NET.host();showLobby(true);drawLobby()}catch(e){onErr(ERR[e.message]||ERR.offline)}
+  $('hostBtn').disabled=false;$('hostBtn').textContent='Create lobby'};
+$('codeIn').oninput=()=>{$('codeIn').value=$('codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g,'')};
+$('codeIn').onkeydown=e=>{if(e.key==='Enter')$('joinBtn').click()};
+$('joinBtn').onclick=async()=>{onErr('');const b=$('joinBtn');b.disabled=true;b.textContent='Joining…';
+  try{await NET.join($('codeIn').value);showLobby(true);drawLobby()}catch(e){onErr((ERR[e.message]||ERR.timeout)+' (code: '+e.message+')')}
+  b.disabled=false;b.textContent='Join'};
+$('copyBtn').onclick=()=>{try{navigator.clipboard.writeText(NET.code);toast('Code copied')}catch(e){}};
+$('leaveBtn').onclick=()=>{NET.leave();showLobby(false);onErr('')};
+$('startBtn').onclick=()=>{if(NET.role==='host')NET.start()};
+NET.on('closed',msg=>{showLobby(false);onErr(msg)});
+NET.on('start',info=>{ingame=true;setPlaying(true);drawLobby();window.ogr&&ogr.launch({fullscreen:cfg.fullscreen,keepOpen:false,mp:info})});
+
+// ---------- updates ----------
+function drawUpd(u){const e=$('upd');if(!e||!u)return;const b='Game build '+u.v;
+  const t={checking:b+' · checking for updates…',downloading:'Downloading update (build '+u.nv+')…',latest:b+' · up to date',offline:b+" · couldn't check for updates",updated:b+' · update installed',idle:b,reinstall:b+' · a new version needs a fresh download. Ask for the new zip.'}[u.status]||b;
+  e.textContent=t;
+  if(u.status==='updated'&&((ogr.cfg.build|0)<u.v)){const bt=document.createElement('button');bt.textContent='Restart to update';bt.onclick=()=>ogr.restart();e.appendChild(bt)}}
+if(window.ogr&&ogr.onUpdate){ogr.onUpdate(drawUpd);drawUpd({v:ogr.cfg.build|0,status:'idle'})}
+const busyNow=()=>{try{ogr.setBusy(!!NET.role||ingame)}catch(e){}};
+NET.on('lobby',()=>{drawLobby();busyNow()});
+setInterval(busyNow,2000);
+
+const L=$('launch');
+function setPlaying(on){L.disabled=on;L.querySelector('span').textContent=on?'Playing…':'Launch';$('status').textContent=on?'Game running':'Ready to play'}
+L.onclick=()=>{setPlaying(true);window.ogr&&ogr.launch({fullscreen:cfg.fullscreen,keepOpen:cfg.keepOpen})};
+if(window.ogr){ogr.onGameClosed(()=>{setPlaying(false);refresh();if(ingame){ingame=false;if(NET.role)NET.matchOver();if(NET.role)drawLobby()}});}
+window.addEventListener('focus',refresh);
+refresh();
+</script>
+</body>
+</html>
