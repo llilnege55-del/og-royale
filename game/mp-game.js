@@ -164,7 +164,7 @@ function carSync(b, s) {
 function pupHuman(b, dt) {
   const s = b.st, o = b.o;
   if (!s || b.dead) { o.g.visible = false; if (b.tag) b.tag.visible = false; return true; }
-  const k = 1 - Math.exp(-dt * 11);
+  const k = 1 - Math.exp(-dt * 15);
   if (b.snap || Math.hypot(s.x - b.qx, s.z - b.qz) > 30 || Math.abs(s.y - b.qy) > 30) { b.qx = s.x; b.qy = s.y; b.qz = s.z; b.ry = s.ry; b.snap = 0; }
   else { b.qx += (s.x - b.qx) * k; b.qy += (s.y - b.qy) * k; b.qz += (s.z - b.qz) * k; let dr = s.ry - b.ry; dr = Math.atan2(Math.sin(dr), Math.cos(dr)); b.ry += dr * k; }
   b.x = b.qx; b.y = b.qy; b.z = b.qz; b.hp = s.hp; b.sc = s.sc || 0;
@@ -206,7 +206,7 @@ function pupBot(b, dt) {
   const o = b.o;
   if (s[5] == 0) { o.g.visible = false; b.bus = true; return true; }
   b.bus = false; b.fall = null; o.g.visible = true;
-  const tx = s[1] / 10, ty = s[2] / 10, tz = s[3] / 10, try_ = s[4] / 100, k = 1 - Math.exp(-dt * 7);
+  const tx = s[1] / 10, ty = s[2] / 10, tz = s[3] / 10, try_ = s[4] / 100, k = 1 - Math.exp(-dt * 10);
   if (b.snap == null || Math.hypot(tx - b.qx, tz - b.qz) > 30 || Math.abs(ty - b.qy) > 30) { b.qx = tx; b.qy = ty; b.qz = tz; b.ry = try_; b.snap = 0; }
   else { b.qx += (tx - b.qx) * k; b.qy += (ty - b.qy) * k; b.qz += (tz - b.qz) * k; let dr = try_ - b.ry; dr = Math.atan2(Math.sin(dr), Math.cos(dr)); b.ry += dr * k; }
   const mv = Math.hypot(b.qx - (b.lpx || b.qx), b.qz - (b.lpz || b.qz)) / Math.max(dt, 1e-3); b.lpx = b.qx; b.lpz = b.qz;
@@ -258,9 +258,10 @@ setInterval(() => {
   if (!M.started) return;
   tick++;
   // ~12 updates/s for players, ~6/s for bots: smooth with interpolation, light on the relay
-  if (tick % 2 == 0 && TRQ.length) { send({ t: 'trc', l: TRQ.splice(0, 40) }, true); if (TRQ.length > 120) TRQ = []; }
-  if (tick % 2 == 0) send(myState(), true);
-  if (HOST && tick % 4 == 0) send({ t: 'bs', a: botStates() }, true);
+  // the launcher bundles these every 50 ms and keeps only the newest position, so sending often is cheap
+  if (TRQ.length) { send({ t: 'trc', l: TRQ.splice(0, 40) }, true); if (TRQ.length > 120) TRQ = []; }
+  send(myState(), true);
+  if (HOST && tick % 2 == 0) send({ t: 'bs', a: botStates() }, true);
   if (HOST && tick % 50 == 0 && STO < 1e8) send({ t: 'clk', e: Math.round((T - STO) * 100) / 100 });
 }, 40);
 
@@ -345,6 +346,13 @@ const H = {
   },
   hash(from, d) {
     if (from === I.hostId && d.h !== MYHASH) { M.mismatch = d.h; console.warn('world mismatch', d.h, MYHASH); toast("Your island didn't load the same as the host's. Try restarting the match."); }
+  },
+  netstat(from, d) {
+    let el = document.getElementById('netst');
+    if (!el) { el = document.createElement('div'); el.id = 'netst'; el.style.cssText = 'position:fixed;left:50%;bottom:6px;transform:translateX(-50%);z-index:30;font:700 11px system-ui,sans-serif;letter-spacing:.06em;padding:3px 9px;border-radius:6px;background:rgba(0,0,0,.45);color:#fff;pointer-events:none'; document.body.appendChild(el); }
+    if (d.via === 'host') { el.textContent = 'HOSTING · ' + (d.direct || 0) + ' DIRECT · ' + (d.relay || 0) + ' RELAY'; el.style.color = '#fff'; return; }
+    const ms = d.ms == null ? '…' : d.ms; el.textContent = 'PING ' + ms + ' ms · ' + (d.via === 'direct' ? 'DIRECT' : 'RELAY');
+    el.style.color = d.ms == null ? '#fff' : d.ms < 90 ? '#7dff9a' : d.ms < 180 ? '#ffe600' : '#ff6b6b';
   },
   left(from, d) { gone(d.id); },
   gone(from) { gone(from); }

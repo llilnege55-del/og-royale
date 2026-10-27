@@ -1,20 +1,38 @@
 // OG Royale lobby networking (runs in the launcher window, which stays open between matches).
-// All lobby and match traffic goes through a free public MQTT relay over secure WebSockets, so it
-// works on almost any network (no direct PC-to-PC connection needed). Several relays are tried in
-// order; the host announces its lobby on the first one it reaches and joiners look on each in turn.
+// Lobbies are found and joined through a free public MQTT relay (works on almost any network).
+// For low ping, each joiner then tries a direct WebRTC link to the host; if that works, match
+// traffic goes direct, otherwise it stays on the relay. The host routes everything (star layout).
+// Traffic is bundled every 50 ms, position updates are de-duplicated (only the newest is sent) and
+// dropped rather than queued when a connection backs up, so delay can never pile up.
 (function () {
   const CFG = (window.ogr && ogr.cfg) || {};
-  const BROKERS = /^wss?:\/\/127\.0\.0\.1/.test(CFG.signal || '') ? [{ url: CFG.signal }] : [
+  const LOCAL = /^wss?:\/\/127\.0\.0\.1/.test(CFG.signal || '');
+  const BROKERS = LOCAL ? [{ url: CFG.signal }] : [
     { url: 'wss://broker.emqx.io:8084/mqtt' },
     { url: 'wss://broker.hivemq.com:8884/mqtt' },
     { url: 'wss://public.cloud.shiftr.io', user: 'public', pass: 'public' },
     { url: 'wss://test.mosquitto.org:8081' }
   ];
-  const ROOT = 'ogroyale/v2/';
+  const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+  const TURN_HOST = 'staticauth.openrelay.metered.ca', TURN_SECRET = 'openrelayprojectsecret';
+  let ICE = STUN;
+  async function iceServers() {
+    if (LOCAL) return (ICE = []);
+    try {
+      const user = Math.floor(Date.now() / 1000 + 24 * 3600) + ':ogroyale';
+      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(TURN_SECRET), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(user));
+      ICE = [...STUN, { urls: [`turn:${TURN_HOST}:80`, `turn:${TURN_HOST}:443`, `turns:${TURN_HOST}:443?transport=tcp`], username: user, credential: btoa(String.fromCharCode(...new Uint8Array(sig))) }];
+    } catch (e) { ICE = STUN; }
+    return ICE;
+  }
+  const ROOT = 'ogroyale/v3/';
   const ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const rnd = n => Array.from({ length: n }, () => ALPH[Math.random() * ALPH.length | 0]).join('');
-  const MAX = 8, BUILD = (CFG.build | 0);
+  const MAX = 8, BUILD = (CFG.build | 0), FLUSH_MS = 50;
   const enc = new TextEncoder(), dec = new TextDecoder();
+  const FAST = new Set(['s', 'bs', 'trc']);          // replaceable / droppable
+  const LATEST = new Set(['s', 'bs']);               // only the newest per sender matters
 
   // ---------------- minimal MQTT 3.1.1 client (QoS 0) over WebSocket ----------------
   function mqtt(broker, clientId, will, onMsg, timeoutMs) {
@@ -29,6 +47,7 @@
       const api = {
         sub: t => send(pkt(0x82, [pid >> 8, pid++ & 255, ...str(t), 0])),
         pub: (t, s, retain) => { const p = enc.encode(s); const v = str(t); const body = new Uint8Array(v.length + p.length); body.set(v); body.set(p, v.length); const h = vlen(body.length); const out = new Uint8Array(1 + h.length + body.length); out[0] = 0x30 | (retain ? 1 : 0); out.set(h, 1); out.set(body, 1 + h.length); send(out); },
+        backed: () => ws && ws.bufferedAmount > 96 * 1024,
         close: () => { clearInterval(ping); try { send(new Uint8Array([0xe0, 0])); ws.close(); } catch (e) {} },
         onclose: null, url: broker.url
       };
@@ -62,29 +81,53 @@
     throw new Error('offline');
   }
 
+  // ---------------- outgoing queue per link: bundle, keep newest positions, drop when backed up ----------------
+  function mkQueue() { return { rel: [], fast: [], latest: new Map() }; }
+  function qPush(q, from, d, fast) {
+    if (fast && LATEST.has(d.t)) q.latest.set(from + ':' + d.t, [from, d, 1]);
+    else if (fast) { q.fast.push([from, d, 1]); if (q.fast.length > 40) q.fast.splice(0, q.fast.length - 40); }
+    else q.rel.push([from, d, 0]);
+  }
+  function qTake(q, backed) {
+    const rel = q.rel.splice(0), fast = backed ? [] : [...q.latest.values(), ...q.fast];
+    q.latest.clear(); q.fast.length = 0;
+    return { rel, fast };
+  }
+
+  // ---------------- direct WebRTC link (signalled over the relay) ----------------
+  function mkPC(sendSig) {
+    const pc = new RTCPeerConnection({ iceServers: ICE });
+    const q = []; let ready = false;
+    pc.onicecandidate = e => { if (e.candidate) sendSig({ t: 'ice', c: e.candidate.toJSON() }); };
+    pc.addCand = c => { if (ready) pc.addIceCandidate(c).catch(() => {}); else q.push(c); };
+    pc.remoteReady = () => { ready = true; q.splice(0).forEach(c => pc.addIceCandidate(c).catch(() => {})); };
+    return pc;
+  }
+  const dcOpen = L => L && L.dcF && L.dcR && L.dcF.readyState === 'open' && L.dcR.readyState === 'open';
+
   const Net = {
     role: null, code: null, me: null, players: [], ev: {}, inMatch: false,
     on(k, f) { this.ev[k] = f; },
     emit(k, ...a) { const f = this.ev[k]; if (f) try { f(...a); } catch (e) { console.error(e); } },
     profile: () => ({}),
     T(x) { return ROOT + this.code + '/' + x; },
-    send(topic, m, retain) { if (this.mq) this.mq.pub(this.T(topic), JSON.stringify(m), retain); },
+    send(topic, m, retain) { if (!this.mq) return; this.mq.pub(this.T(topic), m === '' ? '' : JSON.stringify(m), retain); },
+    stat() { return { ms: this.rtt == null ? null : Math.round(this.rtt), via: this.role === 'host' ? 'host' : (dcOpen(this.link) ? 'direct' : 'relay') }; },
 
     // ---------------- host ----------------
     async host() {
       this.leave(true);
+      await iceServers();
       this.role = 'host'; this.me = 'p0'; this.peers = new Map(); this.inMatch = false;
-      const cid = 'ogr' + rnd(10);
-      let code = rnd(4), seen = {};
-      // will: if the host's connection drops, the broker clears the lobby so joiners know it closed
-      const willFor = c => ({ topic: ROOT + c + '/lobby', msg: '', retain: true });
-      this.code = code;
-      this.mq = await anyBroker(cid, willFor(code), (t, s) => this._hostRx(t, s));
+      this.code = rnd(4);
+      this.mq = await anyBroker('ogr' + rnd(10), { topic: ROOT + this.code + '/lobby', msg: '', retain: true }, (t, s) => this._hostRx(t, s));
       this.mq.onclose = () => { if (this.role === 'host') { this.emit('closed', 'Lost the connection to the online service. Create the lobby again.'); this.leave(true); } };
       this.mq.sub(this.T('h')); this.mq.sub(this.T('a'));
       this.players = [{ id: 'p0', host: true, ...this.profile() }];
       this._lobby();
       this._hb = setInterval(() => this._sweep(), 3000);
+      this._fl = setInterval(() => this._flushHost(), FLUSH_MS);
+      this._ns = setInterval(() => { if (!this.peers) return; let d = 0, r = 0; for (const P of this.peers.values()) if (P.info) dcOpen(P) ? d++ : r++; ogr.toGame({ from: 'net', d: { t: 'netstat', via: 'host', direct: d, relay: r } }); }, 2000);
       return this.code;
     },
     _hostRx(t, s) {
@@ -97,20 +140,58 @@
           if ((m.build | 0) !== BUILD) { this.send('c/' + from, { t: 'reject', why: (m.build | 0) < BUILD ? 'oldyou' : 'oldhost' }); return; }
           if (this.inMatch) { this.send('c/' + from, { t: 'reject', why: 'match' }); return; }
           if (!P && this.peers.size >= MAX - 1) { this.send('c/' + from, { t: 'reject', why: 'full' }); return; }
-          P = P || { id: from }; P.seen = Date.now();
+          P = P || { id: from, q: mkQueue() }; P.seen = Date.now();
           P.info = { id: from, name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 };
           this.peers.set(from, P);
           this.send('c/' + from, { t: 'welcome', you: from, code: this.code });
           this._lobby();
-        } else if (P) {
-          P.seen = Date.now();
-          if (m.t === 'prof') { Object.assign(P.info, { name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 }); this._lobby(); }
-          else if (m.t === 'bye') this._drop(from);
+          return;
         }
-      } else if (t === this.T('a') && m.t === 'g') {
-        const P = this.peers.get(from); if (P) P.seen = Date.now();
-        if (m.d && m.d.t === 'gone' && P && !this.inMatch) { this._drop(from); return; }
-        if (!m.d.to || m.d.to === 'p0') ogr.toGame({ from, d: m.d });
+        if (!P) return;
+        P.seen = Date.now();
+        if (m.t === 'prof') { Object.assign(P.info, { name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 }); this._lobby(); }
+        else if (m.t === 'bye') this._drop(from);
+        else if (m.t === 'pi') this.send('c/' + from, { t: 'po', ts: m.ts });
+        else if (m.t === 'B') this._hostBundle(P, m);
+        else if (m.t === 'rtc') this._hostRtc(P, m);
+        else if (m.t === 'ice') { if (P.pc && m.c) P.pc.addCand(m.c); }
+      } else if (t === this.T('a') && m.t === 'g' && m.d && m.d.t === 'gone') {
+        const P = this.peers.get(from);
+        if (P && !this.inMatch) this._drop(from); else if (P) { this._route(from, m.d, false); ogr.toGame({ from, d: m.d }); }
+      }
+    },
+    async _hostRtc(P, m) {
+      try {
+        if (P.pc) try { P.pc.close(); } catch (e) {}
+        const pc = P.pc = mkPC(x => this.send('c/' + P.id, x));
+        pc.ondatachannel = e => {
+          const c = e.channel; if (c.label === 'f') P.dcF = c; else P.dcR = c;
+          c.onmessage = ev => { let b; try { b = JSON.parse(ev.data); } catch (x) { return; } P.seen = Date.now(); if (b.t === 'B') this._hostBundle(P, b); else if (b.t === 'pi') { try { P.dcR.send(JSON.stringify({ t: 'po', ts: b.ts })); } catch (x) {} } };
+        };
+        await pc.setRemoteDescription(m.sdp); pc.remoteReady();
+        const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
+        this.send('c/' + P.id, { t: 'rtc', sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription });
+      } catch (e) {}
+    },
+    _hostBundle(P, b) {
+      for (const [from, d, fast] of b.l || []) {
+        if (from !== P.id || !d) continue;           // a client may only speak for itself
+        if (!d.to || d.to === 'p0') ogr.toGame({ from, d });
+        this._route(from, d, !!fast);
+      }
+    },
+    _route(from, d, fast) {                        // forward to every other client (or just the addressee)
+      if (!this.peers) return;
+      for (const Q of this.peers.values()) if (Q.id !== from && Q.info && (!d.to || d.to === Q.id)) qPush(Q.q, from, d, fast);
+    },
+    _flushHost() {
+      if (!this.peers) return;
+      for (const P of this.peers.values()) {
+        const direct = dcOpen(P), { rel, fast } = qTake(P.q, direct ? P.dcF.bufferedAmount > 128 * 1024 : this.mq && this.mq.backed());
+        if (!rel.length && !fast.length) continue;
+        if (direct) {
+          try { if (rel.length) P.dcR.send(JSON.stringify({ t: 'B', l: rel })); if (fast.length) P.dcF.send(JSON.stringify({ t: 'B', l: fast })); } catch (e) {}
+        } else this.send('c/' + P.id, { t: 'B', l: [...rel, ...fast] });
       }
     },
     _sweep() {
@@ -120,8 +201,8 @@
     },
     _drop(id, timedOut) {
       if (!this.peers || !this.peers.has(id)) return;
-      this.peers.delete(id);
-      if (timedOut) { ogr.toGame({ from: id, d: { t: 'gone' } }); this.send('a', { t: 'g', from: id, d: { t: 'gone' } }); }
+      const P = this.peers.get(id); this.peers.delete(id); try { P.pc && P.pc.close(); } catch (e) {}
+      if (timedOut || this.inMatch) { ogr.toGame({ from: id, d: { t: 'gone' } }); this._route(id, { t: 'gone' }, false); }
       this._lobby();
     },
     _lobby() {
@@ -154,6 +235,7 @@
       this.leave(true);
       code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length !== 4) throw new Error('code');
+      await iceServers();
       this.role = 'client'; this.code = code; this.me = 'c' + rnd(6);
       const me = this.me, cid = 'ogr' + rnd(10);
       const will = { topic: this.T('a'), msg: JSON.stringify({ t: 'g', from: me, d: { t: 'gone' } }) };
@@ -164,28 +246,59 @@
         try { mq = await mqtt(b, cid, will, (t, s) => this._clientRx(t, s), 6000); } catch (e) { continue; }
         reachable = true; this.mq = mq;
         const res = await new Promise(resolve => {
-          let found = false;
+          let found = false, t2;
+          const t1 = setTimeout(() => resolve({ err: 'notfound' }), 3500);
           this._clientWait = (kind, data) => {
-            if (kind === 'lobby') { if (!found) { found = true; mq.sub(this.T('c/' + me)); mq.sub(this.T('a')); setTimeout(() => this.send('h', { t: 'hello', from: me, build: BUILD, ...this.profile() }), 300); clearTimeout(t1); t2 = setTimeout(() => resolve({ err: 'timeout' }), 8000); } }
-            else if (kind === 'welcome') resolve({ ok: data });
-            else if (kind === 'reject') resolve({ err: data });
-            else if (kind === 'empty') resolve({ err: 'notfound' });
+            if (kind === 'lobby') { if (!found) { found = true; clearTimeout(t1); mq.sub(this.T('c/' + me)); mq.sub(this.T('a')); setTimeout(() => this.send('h', { t: 'hello', from: me, build: BUILD, ...this.profile() }), 300); t2 = setTimeout(() => resolve({ err: 'timeout' }), 8000); } }
+            else if (kind === 'welcome') { clearTimeout(t2); resolve({ ok: data }); }
+            else if (kind === 'reject') { clearTimeout(t2); resolve({ err: data }); }
+            else if (kind === 'empty') { clearTimeout(t1); resolve({ err: 'notfound' }); }
           };
-          let t2; const t1 = setTimeout(() => resolve({ err: 'notfound' }), 3500);
           mq.sub(this.T('lobby'));
         });
         this._clientWait = null;
         if (res.ok) {
           mq.onclose = () => { if (this.role === 'client' && this.me === me) { this.emit('closed', 'Lost the connection to the online service. Join again.'); ogr.toGame({ from: 'p0', d: { t: 'gone' } }); this.leave(true); } };
-          this._ping = setInterval(() => this.send('h', { t: 'ping', from: me }), 4000);
+          this.q = mkQueue();
+          this._fl = setInterval(() => this._flushClient(), FLUSH_MS);
+          this._ping = setInterval(() => this._sendPing(), 2000);
+          this._tryDirect();
           return res.ok;
         }
         try { mq.close(); } catch (e) {} this.mq = null;
         lastErr = res.err;
-        if (res.err !== 'notfound') break;      // found the lobby but it refused us: no point trying other relays
+        if (res.err !== 'notfound') break;
       }
       this.leave(true);
       throw new Error(reachable ? lastErr : 'offline');
+    },
+    async _tryDirect() {
+      try { if (localStorage.getItem('ogrNoDirect')) return; } catch (e) {}
+      try {
+        const L = this.link = { pc: mkPC(x => this.send('h', { ...x, from: this.me })) };
+        L.dcF = L.pc.createDataChannel('f', { ordered: false, maxRetransmits: 0 });
+        L.dcR = L.pc.createDataChannel('r');
+        const onm = ev => { let b; try { b = JSON.parse(ev.data); } catch (x) { return; } this._clientMsg(b); };
+        L.dcF.onmessage = onm; L.dcR.onmessage = onm;
+        const off = await L.pc.createOffer(); await L.pc.setLocalDescription(off);
+        this.send('h', { t: 'rtc', from: this.me, sdp: L.pc.localDescription.toJSON ? L.pc.localDescription.toJSON() : L.pc.localDescription });
+      } catch (e) { this.link = null; }
+    },
+    _sendPing() {
+      const m = { t: 'pi', from: this.me, ts: performance.now() };
+      if (dcOpen(this.link)) try { this.link.dcR.send(JSON.stringify(m)); return; } catch (e) {}
+      this.send('h', m);
+    },
+    _clientMsg(m) {
+      if (m.t === 'B') { for (const [from, d] of m.l || []) if (from !== this.me && d && (!d.to || d.to === this.me)) ogr.toGame({ from, d }); }
+      else if (m.t === 'po') { const r = performance.now() - m.ts; this.rtt = this.rtt == null ? r : this.rtt * .6 + r * .4; ogr.toGame({ from: 'net', d: { t: 'netstat', ...this.stat() } }); }
+    },
+    _flushClient() {
+      if (!this.q) return;
+      const direct = dcOpen(this.link), { rel, fast } = qTake(this.q, direct ? this.link.dcF.bufferedAmount > 128 * 1024 : this.mq && this.mq.backed());
+      if (!rel.length && !fast.length) return;
+      if (direct) { try { if (rel.length) this.link.dcR.send(JSON.stringify({ t: 'B', l: rel })); if (fast.length) this.link.dcF.send(JSON.stringify({ t: 'B', l: fast })); return; } catch (e) {} }
+      this.send('h', { t: 'B', from: this.me, l: [...rel, ...fast] });
     },
     _clientRx(t, s) {
       if (t === this.T('lobby')) {
@@ -200,36 +313,45 @@
       if (t === this.T('c/' + this.me)) {
         if (m.t === 'welcome') { if (this._clientWait) this._clientWait('welcome', m); }
         else if (m.t === 'reject') { if (this._clientWait) this._clientWait('reject', m.why); }
+        else if (m.t === 'rtc') { const L = this.link; if (L) L.pc.setRemoteDescription(m.sdp).then(() => L.pc.remoteReady()).catch(() => {}); }
+        else if (m.t === 'ice') { if (this.link && m.c) this.link.pc.addCand(m.c); }
+        else this._clientMsg(m);
       } else if (t === this.T('a')) {
         if (m.from === this.me) return;
         if (m.t === 'start') { this.inMatch = true; this.emit('start', { ...m.info, me: this.me, host: false }); }
-        else if (m.t === 'g' && m.d && (!m.d.to || m.d.to === this.me)) ogr.toGame({ from: m.from, d: m.d });
+        else if (m.t === 'g' && m.d && m.d.t === 'gone' && m.from === 'p0') ogr.toGame({ from: 'p0', d: m.d });
       }
     },
 
     // ---------------- both ----------------
     fromGame(m) {
-      if (!m || !m.d || !this.mq || !this.role) return;
-      this.send('a', { t: 'g', from: this.me, d: m.d });
+      if (!m || !m.d || !this.role) return;
+      const fast = !!m.f && FAST.has(m.d.t);
+      if (this.role === 'host') {
+        if (m.d.t === 'gone') { this.send('a', { t: 'g', from: 'p0', d: m.d }); }
+        this._route('p0', m.d, fast);
+      } else if (this.q) {
+        if (m.d.t === 'gone') this.send('a', { t: 'g', from: this.me, d: m.d });
+        else qPush(this.q, this.me, m.d, fast);
+      }
     },
     toAll(d) { this.fromGame({ d, f: 0 }); },
     leave(silent) {
       const was = this.role;
-      clearInterval(this._hb); clearInterval(this._ping);
+      clearInterval(this._hb); clearInterval(this._ping); clearInterval(this._fl); clearInterval(this._ns);
+      if (this.peers) for (const P of this.peers.values()) try { P.pc && P.pc.close(); } catch (e) {}
+      if (this.link) { try { this.link.pc.close(); } catch (e) {} this.link = null; }
       if (this.mq) {
         try {
           if (was === 'host') this.send('lobby', '', true);
-          else if (was === 'client' && this.me) { this.send('h', { t: 'bye', from: this.me }); }
+          else if (was === 'client' && this.me) this.send('h', { t: 'bye', from: this.me });
         } catch (e) {}
         const mq = this.mq; this.mq = null; mq.onclose = null; setTimeout(() => mq.close(), 200);
       }
-      this.role = null; this.code = null; this.me = null; this.players = []; this.inMatch = false; this.peers = null; this._clientWait = null;
+      this.role = null; this.code = null; this.me = null; this.players = []; this.inMatch = false; this.peers = null; this._clientWait = null; this.q = null; this.rtt = null;
       if (was && !silent) this.emit('left');
     }
   };
-  // publishing an empty retained message must go out as an empty payload, not '""'
-  const _send = Net.send;
-  Net.send = function (topic, m, retain) { if (m === '') { if (this.mq) this.mq.pub(this.T(topic), '', retain); return; } return _send.call(this, topic, m, retain); };
   window.NET = Net;
   if (window.ogr && ogr.onFromGame) ogr.onFromGame(m => Net.fromGame(m));
 })();
