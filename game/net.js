@@ -1,58 +1,65 @@
 // OG Royale lobby networking (runs in the launcher window, which stays open between matches).
-// Players find each other through a public PeerJS signalling server, then talk directly over
-// WebRTC data channels. The host is the hub: clients connect to the host, and the host relays.
+// All lobby and match traffic goes through a free public MQTT relay over secure WebSockets, so it
+// works on almost any network (no direct PC-to-PC connection needed). Several relays are tried in
+// order; the host announces its lobby on the first one it reaches and joiners look on each in turn.
 (function () {
-  const SIG = (window.ogr && ogr.cfg && ogr.cfg.signal) || 'wss://0.peerjs.com:443/peerjs';
-  const PREFIX = 'ogroyale-v1-';
-  const STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-  // Relay fallback (Open Relay by Metered, free public TURN). Used automatically when two
-  // networks can't reach each other directly (school/work Wi-Fi, strict routers, same-network hairpin).
-  const TURN_HOST = 'staticauth.openrelay.metered.ca', TURN_SECRET = 'openrelayprojectsecret';
-  let ICE = STUN;
-  async function iceServers() {
-    try {
-      const user = Math.floor(Date.now() / 1000 + 24 * 3600) + ':ogroyale';
-      const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(TURN_SECRET), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-      const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(user));
-      const cred = btoa(String.fromCharCode(...new Uint8Array(sig)));
-      ICE = [...STUN, { urls: [`turn:${TURN_HOST}:80`, `turn:${TURN_HOST}:80?transport=tcp`, `turn:${TURN_HOST}:443`, `turns:${TURN_HOST}:443?transport=tcp`], username: user, credential: cred }];
-    } catch (e) { ICE = STUN; }
-    return ICE;
-  }
+  const CFG = (window.ogr && ogr.cfg) || {};
+  const BROKERS = /^wss?:\/\/127\.0\.0\.1/.test(CFG.signal || '') ? [{ url: CFG.signal }] : [
+    { url: 'wss://broker.emqx.io:8084/mqtt' },
+    { url: 'wss://broker.hivemq.com:8884/mqtt' },
+    { url: 'wss://public.cloud.shiftr.io', user: 'public', pass: 'public' },
+    { url: 'wss://test.mosquitto.org:8081' }
+  ];
+  const ROOT = 'ogroyale/v2/';
   const ALPH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const rnd = n => Array.from({ length: n }, () => ALPH[Math.random() * ALPH.length | 0]).join('');
-  const MAX = 8;
+  const MAX = 8, BUILD = (CFG.build | 0);
+  const enc = new TextEncoder(), dec = new TextDecoder();
 
-  function signal(id, onMsg) {
+  // ---------------- minimal MQTT 3.1.1 client (QoS 0) over WebSocket ----------------
+  function mqtt(broker, clientId, will, onMsg, timeoutMs) {
     return new Promise((resolve, reject) => {
-      const token = Math.random().toString(36).slice(2);
-      let ws, hb, opened = false;
-      try { ws = new WebSocket(`${SIG}?key=peerjs&id=${encodeURIComponent(id)}&token=${token}&version=1.5.4`); }
-      catch (e) { reject(new Error('offline')); return; }
+      let ws, buf = new Uint8Array(0), done = false, ping, pid = 1;
+      const fail = e => { if (done) return; done = true; clearTimeout(to); try { ws.close(); } catch (x) {} reject(e); };
+      const to = setTimeout(() => fail(new Error('offline')), timeoutMs || 6000);
+      const vlen = n => { const o = []; do { let b = n % 128; n = Math.floor(n / 128); if (n > 0) b |= 128; o.push(b); } while (n > 0); return o; };
+      const str = s => { const b = enc.encode(s); return [b.length >> 8, b.length & 255, ...b]; };
+      const pkt = (h, body) => new Uint8Array([h, ...vlen(body.length), ...body]);
+      const send = p => { if (ws && ws.readyState === 1) ws.send(p); };
       const api = {
-        send: m => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); },
-        close: () => { clearInterval(hb); try { ws.close(); } catch (e) {} }
+        sub: t => send(pkt(0x82, [pid >> 8, pid++ & 255, ...str(t), 0])),
+        pub: (t, s, retain) => { const p = enc.encode(s); const v = str(t); const body = new Uint8Array(v.length + p.length); body.set(v); body.set(p, v.length); const h = vlen(body.length); const out = new Uint8Array(1 + h.length + body.length); out[0] = 0x30 | (retain ? 1 : 0); out.set(h, 1); out.set(body, 1 + h.length); send(out); },
+        close: () => { clearInterval(ping); try { send(new Uint8Array([0xe0, 0])); ws.close(); } catch (e) {} },
+        onclose: null, url: broker.url
       };
-      const to = setTimeout(() => { if (!opened) { api.close(); reject(new Error('offline')); } }, 12000);
+      try { ws = new WebSocket(broker.url, 'mqtt'); } catch (e) { fail(new Error('offline')); return; }
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        let flags = 0x02, pay = [...str(clientId)];
+        if (will) { flags |= 0x04 | (will.retain ? 0x20 : 0); pay.push(...str(will.topic), ...str(will.msg)); }
+        if (broker.user) { flags |= 0x80; pay.push(...str(broker.user)); }
+        if (broker.pass) { flags |= 0x40; pay.push(...str(broker.pass)); }
+        send(pkt(0x10, [...str('MQTT'), 4, flags, 0, 30, ...pay]));
+      };
       ws.onmessage = ev => {
-        let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
-        if (m.type === 'OPEN') { opened = true; clearTimeout(to); hb = setInterval(() => api.send({ type: 'HEARTBEAT' }), 5000); resolve(api); return; }
-        if (m.type === 'ID-TAKEN') { clearTimeout(to); api.close(); reject(new Error('taken')); return; }
-        if (m.type === 'ERROR' && !opened) { clearTimeout(to); api.close(); reject(new Error('offline')); return; }
-        onMsg(m);
+        const a = new Uint8Array(ev.data), m = new Uint8Array(buf.length + a.length); m.set(buf); m.set(a, buf.length); buf = m;
+        while (buf.length >= 2) {
+          let mul = 1, len = 0, i = 1, b;
+          do { if (i >= buf.length) return; b = buf[i++]; len += (b & 127) * mul; mul *= 128; } while (b & 128);
+          if (buf.length < i + len) return;
+          const type = buf[0] >> 4, qos = (buf[0] >> 1) & 3, body = buf.subarray(i, i + len);
+          buf = buf.slice(i + len);
+          if (type === 2) { if (body[1] !== 0) { fail(new Error('offline')); return; } done = true; clearTimeout(to); ping = setInterval(() => send(new Uint8Array([0xc0, 0])), 20000); resolve(api); }
+          else if (type === 3) { const tl = (body[0] << 8) | body[1]; const topic = dec.decode(body.subarray(2, 2 + tl)); const off = 2 + tl + (qos ? 2 : 0); try { onMsg(topic, dec.decode(body.subarray(off))); } catch (e) { console.error(e); } }
+        }
       };
-      ws.onerror = () => { if (!opened) { clearTimeout(to); reject(new Error('offline')); } };
-      ws.onclose = () => { clearInterval(hb); if (!opened) { clearTimeout(to); reject(new Error('offline')); } else if (api.onclose) api.onclose(); };
+      ws.onerror = () => fail(new Error('offline'));
+      ws.onclose = () => { clearInterval(ping); if (!done) fail(new Error('offline')); else if (api.onclose) api.onclose(); };
     });
   }
-
-  function mkPC(sig, dst) {
-    const pc = new RTCPeerConnection({ iceServers: ICE });
-    const q = []; let ready = false;
-    pc.onicecandidate = e => { if (e.candidate) sig.send({ type: 'CANDIDATE', dst, payload: { c: e.candidate.toJSON() } }); };
-    pc.addCand = c => { if (ready) pc.addIceCandidate(c).catch(() => {}); else q.push(c); };
-    pc.remoteReady = () => { ready = true; q.splice(0).forEach(c => pc.addIceCandidate(c).catch(() => {})); };
-    return pc;
+  async function anyBroker(clientId, will, onMsg) {
+    for (const b of BROKERS) { try { return await mqtt(b, clientId, will, onMsg, 6000); } catch (e) {} }
+    throw new Error('offline');
   }
 
   const Net = {
@@ -60,80 +67,67 @@
     on(k, f) { this.ev[k] = f; },
     emit(k, ...a) { const f = this.ev[k]; if (f) try { f(...a); } catch (e) { console.error(e); } },
     profile: () => ({}),
+    T(x) { return ROOT + this.code + '/' + x; },
+    send(topic, m, retain) { if (this.mq) this.mq.pub(this.T(topic), JSON.stringify(m), retain); },
 
     // ---------------- host ----------------
     async host() {
       this.leave(true);
-      this.role = 'host'; this.me = 'p0'; this.peers = new Map(); this.seat = 1;
-      await iceServers();
-      let tries = 0;
-      while (true) {
-        this.code = rnd(4);
-        try { this.sig = await signal(PREFIX + this.code, m => this._hostSig(m)); break; }
-        catch (e) { if (e.message !== 'taken' || ++tries > 4) { this.role = null; throw e; } }
-      }
-      this.sig.onclose = () => { if (this.role === 'host') this._reopenSig(); };
+      this.role = 'host'; this.me = 'p0'; this.peers = new Map(); this.inMatch = false;
+      const cid = 'ogr' + rnd(10);
+      let code = rnd(4), seen = {};
+      // will: if the host's connection drops, the broker clears the lobby so joiners know it closed
+      const willFor = c => ({ topic: ROOT + c + '/lobby', msg: '', retain: true });
+      this.code = code;
+      this.mq = await anyBroker(cid, willFor(code), (t, s) => this._hostRx(t, s));
+      this.mq.onclose = () => { if (this.role === 'host') { this.emit('closed', 'Lost the connection to the online service. Create the lobby again.'); this.leave(true); } };
+      this.mq.sub(this.T('h')); this.mq.sub(this.T('a'));
       this.players = [{ id: 'p0', host: true, ...this.profile() }];
       this._lobby();
+      this._hb = setInterval(() => this._sweep(), 3000);
       return this.code;
     },
-    async _reopenSig() {
-      try { this.sig = await signal(PREFIX + this.code, m => this._hostSig(m)); this.sig.onclose = () => { if (this.role === 'host') this._reopenSig(); }; }
-      catch (e) { setTimeout(() => { if (this.role === 'host') this._reopenSig(); }, 5000); }
-    },
-    async _hostSig(m) {
-      const src = m.src;
-      if (m.type === 'OFFER') {
-        if (this.peers.size >= MAX - 1 || this.inMatch) { this.sig.send({ type: 'ANSWER', dst: src, payload: { full: this.inMatch ? 'match' : 'full' } }); return; }
-        const old = this.peers.get(src); if (old) { try { old.pc.close(); } catch (e) {} }
-        const pc = mkPC(this.sig, src), P = { pc, sid: src, id: null, ch: {} };
-        this.peers.set(src, P);
-        pc.ondatachannel = e => { const c = e.channel; P.ch[c.label] = c; c.onmessage = ev => this._hostMsg(P, ev.data); c.onclose = () => this._drop(P); };
-        pc.onconnectionstatechange = () => { if (['failed', 'closed'].includes(pc.connectionState)) this._drop(P); };
-        try {
-          await pc.setRemoteDescription(m.payload.sdp); pc.remoteReady();
-          const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
-          this.sig.send({ type: 'ANSWER', dst: src, payload: { sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription } });
-        } catch (e) { this._drop(P); }
-      } else if (m.type === 'CANDIDATE') {
-        const P = this.peers.get(src); if (P && m.payload && m.payload.c) P.pc.addCand(m.payload.c);
+    _hostRx(t, s) {
+      if (!this.code || !s) return;
+      let m; try { m = JSON.parse(s); } catch (e) { return; }
+      const from = m.from; if (!from || from === 'p0') return;
+      if (t === this.T('h')) {
+        let P = this.peers.get(from);
+        if (m.t === 'hello') {
+          if ((m.build | 0) !== BUILD) { this.send('c/' + from, { t: 'reject', why: (m.build | 0) < BUILD ? 'oldyou' : 'oldhost' }); return; }
+          if (this.inMatch) { this.send('c/' + from, { t: 'reject', why: 'match' }); return; }
+          if (!P && this.peers.size >= MAX - 1) { this.send('c/' + from, { t: 'reject', why: 'full' }); return; }
+          P = P || { id: from }; P.seen = Date.now();
+          P.info = { id: from, name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 };
+          this.peers.set(from, P);
+          this.send('c/' + from, { t: 'welcome', you: from, code: this.code });
+          this._lobby();
+        } else if (P) {
+          P.seen = Date.now();
+          if (m.t === 'prof') { Object.assign(P.info, { name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 }); this._lobby(); }
+          else if (m.t === 'bye') this._drop(from);
+        }
+      } else if (t === this.T('a') && m.t === 'g') {
+        const P = this.peers.get(from); if (P) P.seen = Date.now();
+        if (m.d && m.d.t === 'gone' && P && !this.inMatch) { this._drop(from); return; }
+        if (!m.d.to || m.d.to === 'p0') ogr.toGame({ from, d: m.d });
       }
     },
-    _hostMsg(P, raw) {
-      let m; try { m = JSON.parse(raw); } catch (e) { return; }
-      if (m.t === 'hello') {
-        const mine = (window.ogr && ogr.cfg && ogr.cfg.build) | 0;
-        if ((m.build | 0) !== mine) { this._send(P, { t: 'reject', why: (m.build | 0) < mine ? 'oldyou' : 'oldhost' }); setTimeout(() => this._drop(P), 1500); return; }
-        if (!P.id) P.id = 'p' + (this.seat++);
-        P.info = { id: P.id, name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 };
-        this._send(P, { t: 'welcome', you: P.id, code: this.code });
-        this._lobby();
-      } else if (m.t === 'g' && P.id) {
-        const msg = { from: P.id, d: m.d }, fast = !!m.f;
-        if (!m.d.to || m.d.to === 'p0') ogr.toGame(msg);
-        for (const Q of this.peers.values()) if (Q !== P && Q.id && (!m.d.to || m.d.to === Q.id)) this._send(Q, { t: 'g', from: P.id, d: m.d }, fast);
-      } else if (m.t === 'prof' && P.info) {
-        Object.assign(P.info, { name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 }); this._lobby();
-      }
+    _sweep() {
+      if (this.role !== 'host') return;
+      const now = Date.now();
+      for (const [id, P] of this.peers) if (now - (P.seen || 0) > 15000) this._drop(id, true);
     },
-    _drop(P) {
-      if (!this.peers || !this.peers.has(P.sid) || this.peers.get(P.sid) !== P) return;
-      this.peers.delete(P.sid); try { P.pc.close(); } catch (e) {}
-      if (P.id) {
-        ogr.toGame({ from: P.id, d: { t: 'gone' } });
-        this._bcast({ t: 'g', from: P.id, d: { t: 'gone' } });
-      }
+    _drop(id, timedOut) {
+      if (!this.peers || !this.peers.has(id)) return;
+      this.peers.delete(id);
+      if (timedOut) { ogr.toGame({ from: id, d: { t: 'gone' } }); this.send('a', { t: 'g', from: id, d: { t: 'gone' } }); }
       this._lobby();
     },
-    _send(P, m, fast) {
-      const c = (fast && P.ch.fast && P.ch.fast.readyState === 'open') ? P.ch.fast : P.ch.rel;
-      if (c && c.readyState === 'open') { try { c.send(JSON.stringify(m)); } catch (e) {} }
-    },
-    _bcast(m, fast) { if (this.peers) for (const P of this.peers.values()) if (P.id) this._send(P, m, fast); },
     _lobby() {
       if (this.role !== 'host') return;
       this.players = [{ id: 'p0', host: true, ...this.profile() }, ...[...this.peers.values()].filter(P => P.info).map(P => P.info)];
-      this._bcast({ t: 'lobby', code: this.code, players: this.players, inMatch: this.inMatch });
+      this.send('lobby', { t: 'lobby', code: this.code, players: this.players, inMatch: this.inMatch, build: BUILD, at: Date.now() }, true);
       this.emit('lobby', this.players);
     },
     start() {
@@ -142,7 +136,7 @@
       const n = this.players.length;
       const info = { seed: (Math.random() * 4294967295) >>> 0, spawn: Math.random() * 5 | 0, busA: Math.random() * 6.283,
         bots: Math.max(5, 20 - n), players: this.players, hostId: 'p0', mid: rnd(6) };
-      this._bcast({ t: 'start', info });
+      this.send('a', { t: 'start', from: 'p0', info });
       this.inMatch = true; this._lobby();
       this.emit('start', { ...info, me: 'p0', host: true });
     },
@@ -152,7 +146,7 @@
     },
     updateProfile() {
       if (this.role === 'host') this._lobby();
-      else if (this.role === 'client' && this.ch && this.ch.rel && this.ch.rel.readyState === 'open') this.ch.rel.send(JSON.stringify({ t: 'prof', ...this.profile() }));
+      else if (this.role === 'client') this.send('h', { t: 'prof', from: this.me, ...this.profile() });
     },
 
     // ---------------- client ----------------
@@ -160,69 +154,82 @@
       this.leave(true);
       code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (code.length !== 4) throw new Error('code');
-      this.role = 'client'; this.code = code; this.ch = {};
-      await iceServers();
-      const sid = PREFIX + 'c-' + rnd(10), dst = PREFIX + code;
-      let pc, done = false, answered = false;
-      return new Promise(async (resolve, reject) => {
-        const fail = err => { if (done) return; done = true; this.leave(true); reject(err); };
-        const tmo = setTimeout(() => fail(new Error(answered ? 'nat' : 'noanswer')), 30000);
-        try {
-          this.sig = await signal(sid, async m => {
-            if (m.type === 'ANSWER' && m.payload) {
-              if (m.payload.full) { clearTimeout(tmo); fail(new Error(m.payload.full)); return; }
-              answered = true;
-              try { await pc.setRemoteDescription(m.payload.sdp); pc.remoteReady(); } catch (e) { fail(new Error('timeout')); }
-            } else if (m.type === 'CANDIDATE' && m.payload && m.payload.c) pc.addCand(m.payload.c);
-            else if (m.type === 'EXPIRE' || m.type === 'LEAVE') { clearTimeout(tmo); fail(new Error('notfound')); }
-          });
-        } catch (e) { clearTimeout(tmo); fail(e); return; }
-        pc = this.pc = mkPC(this.sig, dst);
-        const rel = pc.createDataChannel('rel'), fast = pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 });
-        this.ch = { rel, fast };
-        const onm = ev => this._clientMsg(ev.data);
-        rel.onmessage = onm; fast.onmessage = onm;
-        rel.onopen = () => { rel.send(JSON.stringify({ t: 'hello', build: (window.ogr && ogr.cfg && ogr.cfg.build) | 0, ...this.profile() })); };
-        this._failJoin = e => { clearTimeout(tmo); fail(e); };
-        rel.onclose = () => { if (this.role === 'client' && done) { this.emit('closed', 'The host closed the lobby.'); ogr.toGame({ from: 'p0', d: { t: 'gone' } }); this.leave(true); } };
-        pc.onconnectionstatechange = () => { if (pc.connectionState === 'failed') { if (!done) { clearTimeout(tmo); fail(new Error('nat')); } else rel.onclose(); } };
-        this._welcome = info => { if (done) return; done = true; clearTimeout(tmo); try { this.sig.close(); } catch (e) {} this.sig = null; resolve(info); };
-        try {
-          const off = await pc.createOffer(); await pc.setLocalDescription(off);
-          this.sig.send({ type: 'OFFER', dst, payload: { sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription } });
-        } catch (e) { clearTimeout(tmo); fail(e); }
-      });
+      this.role = 'client'; this.code = code; this.me = 'c' + rnd(6);
+      const me = this.me, cid = 'ogr' + rnd(10);
+      const will = { topic: this.T('a'), msg: JSON.stringify({ t: 'g', from: me, d: { t: 'gone' } }) };
+      let lastErr = 'notfound', reachable = false;
+      for (const b of BROKERS) {
+        if (this.role !== 'client' || this.me !== me) throw new Error('cancelled');
+        let mq;
+        try { mq = await mqtt(b, cid, will, (t, s) => this._clientRx(t, s), 6000); } catch (e) { continue; }
+        reachable = true; this.mq = mq;
+        const res = await new Promise(resolve => {
+          let found = false;
+          this._clientWait = (kind, data) => {
+            if (kind === 'lobby') { if (!found) { found = true; mq.sub(this.T('c/' + me)); mq.sub(this.T('a')); setTimeout(() => this.send('h', { t: 'hello', from: me, build: BUILD, ...this.profile() }), 300); clearTimeout(t1); t2 = setTimeout(() => resolve({ err: 'timeout' }), 8000); } }
+            else if (kind === 'welcome') resolve({ ok: data });
+            else if (kind === 'reject') resolve({ err: data });
+            else if (kind === 'empty') resolve({ err: 'notfound' });
+          };
+          let t2; const t1 = setTimeout(() => resolve({ err: 'notfound' }), 3500);
+          mq.sub(this.T('lobby'));
+        });
+        this._clientWait = null;
+        if (res.ok) {
+          mq.onclose = () => { if (this.role === 'client' && this.me === me) { this.emit('closed', 'Lost the connection to the online service. Join again.'); ogr.toGame({ from: 'p0', d: { t: 'gone' } }); this.leave(true); } };
+          this._ping = setInterval(() => this.send('h', { t: 'ping', from: me }), 4000);
+          return res.ok;
+        }
+        try { mq.close(); } catch (e) {} this.mq = null;
+        lastErr = res.err;
+        if (res.err !== 'notfound') break;      // found the lobby but it refused us: no point trying other relays
+      }
+      this.leave(true);
+      throw new Error(reachable ? lastErr : 'offline');
     },
-    _clientMsg(raw) {
-      let m; try { m = JSON.parse(raw); } catch (e) { return; }
-      if (m.t === 'reject') { if (this._failJoin) this._failJoin(new Error(m.why)); return; }
-      if (m.t === 'welcome') { this.me = m.you; if (this._welcome) this._welcome(m); }
-      else if (m.t === 'lobby') { this.players = m.players; this.inMatch = m.inMatch; this.emit('lobby', m.players); }
-      else if (m.t === 'start') { this.inMatch = true; this.emit('start', { ...m.info, me: this.me, host: false }); }
-      else if (m.t === 'g') ogr.toGame({ from: m.from, d: m.d });
+    _clientRx(t, s) {
+      if (t === this.T('lobby')) {
+        if (!s) { if (this._clientWait) this._clientWait('empty'); else if (this.role === 'client') { this.emit('closed', 'The host closed the lobby.'); ogr.toGame({ from: 'p0', d: { t: 'gone' } }); this.leave(true); } return; }
+        let m; try { m = JSON.parse(s); } catch (e) { return; }
+        this.players = m.players || []; this.inMatch = !!m.inMatch;
+        if (this._clientWait) this._clientWait('lobby');
+        this.emit('lobby', this.players);
+        return;
+      }
+      let m; try { m = JSON.parse(s); } catch (e) { return; }
+      if (t === this.T('c/' + this.me)) {
+        if (m.t === 'welcome') { if (this._clientWait) this._clientWait('welcome', m); }
+        else if (m.t === 'reject') { if (this._clientWait) this._clientWait('reject', m.why); }
+      } else if (t === this.T('a')) {
+        if (m.from === this.me) return;
+        if (m.t === 'start') { this.inMatch = true; this.emit('start', { ...m.info, me: this.me, host: false }); }
+        else if (m.t === 'g' && m.d && (!m.d.to || m.d.to === this.me)) ogr.toGame({ from: m.from, d: m.d });
+      }
     },
 
     // ---------------- both ----------------
     fromGame(m) {
-      if (!m || !m.d) return;
-      if (this.role === 'host') {
-        const d = m.d;
-        for (const P of this.peers.values()) if (P.id && (!d.to || d.to === P.id)) this._send(P, { t: 'g', from: 'p0', d }, !!m.f);
-      } else if (this.role === 'client' && this.ch && this.ch.rel) {
-        const c = (m.f && this.ch.fast.readyState === 'open') ? this.ch.fast : this.ch.rel;
-        if (c.readyState === 'open') try { c.send(JSON.stringify({ t: 'g', d: m.d, f: m.f })); } catch (e) {}
-      }
+      if (!m || !m.d || !this.mq || !this.role) return;
+      this.send('a', { t: 'g', from: this.me, d: m.d });
     },
     toAll(d) { this.fromGame({ d, f: 0 }); },
     leave(silent) {
       const was = this.role;
-      if (this.sig) { try { this.sig.close(); } catch (e) {} this.sig = null; }
-      if (this.peers) { for (const P of this.peers.values()) try { P.pc.close(); } catch (e) {} this.peers = null; }
-      if (this.pc) { try { this.pc.close(); } catch (e) {} this.pc = null; }
-      this.role = null; this.code = null; this.me = null; this.players = []; this.inMatch = false; this.ch = null;
+      clearInterval(this._hb); clearInterval(this._ping);
+      if (this.mq) {
+        try {
+          if (was === 'host') this.send('lobby', '', true);
+          else if (was === 'client' && this.me) { this.send('h', { t: 'bye', from: this.me }); }
+        } catch (e) {}
+        const mq = this.mq; this.mq = null; mq.onclose = null; setTimeout(() => mq.close(), 200);
+      }
+      this.role = null; this.code = null; this.me = null; this.players = []; this.inMatch = false; this.peers = null; this._clientWait = null;
       if (was && !silent) this.emit('left');
     }
   };
+  // publishing an empty retained message must go out as an empty payload, not '""'
+  const _send = Net.send;
+  Net.send = function (topic, m, retain) { if (m === '') { if (this.mq) this.mq.pub(this.T(topic), '', retain); return; } return _send.call(this, topic, m, retain); };
   window.NET = Net;
   if (window.ogr && ogr.onFromGame) ogr.onFromGame(m => Net.fromGame(m));
 })();

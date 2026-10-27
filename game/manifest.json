@@ -1,14 +1,14 @@
 {
- "v": 4,
+ "v": 5,
  "shell": 1,
- "notes": "Launcher now shows v1.4",
+ "notes": "Faster, more reliable online lobbies: matches now run through a public relay, so joining works on almost any network",
  "files": {
   "game.html": "97870228b260ca8dbc597aba06968c99fb7f91587b2ea6b164d53b96387108db",
   "mp-pre.js": "be8c9b0b37af841a223c29263f12c785422234671280bb92ddd6dfc8b14e9821",
-  "mp-game.js": "351dc28d1a90665f35e274313fc9df7805497fd552ed1dd1e54b2b0d2d16e6df",
+  "mp-game.js": "5df8397a2ae250827909d51966c362601028fe36ad653d6424ebdc30672dc05f",
   "three.min.js": "dd5fa76b8ab5df86918e8d767ba6ba8529a5880f26c456d973635133b135ac7d",
   "launcher.html": "89ab689e60a1df332af7de4500b4320919572694a4c0fdedf56265b4ab8183b4",
-  "net.js": "0fd1cfabebdbe3d10f500e78d01007419b2f616a218746a49cdb2abf980e7a11",
+  "net.js": "fd971bb47cafaf7ccb230aa574dae48fab6ca49ea62cfdf6801bde506df19fda",
   "icon.png": "664488bb94d230960669db44babe2d98618a31c39c48410bbba5a671ed39ed1d",
   "hero.jpg": "01141d2db1b5af37c068d93bf6e68b5eb6d0ec946fad9cc64d6b2e23e01171e4"
  }
