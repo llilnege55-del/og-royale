@@ -1,14 +1,14 @@
 {
- "v": 6,
+ "v": 7,
  "shell": 1,
- "notes": "Much lower ping online: direct connections when possible, bundled updates, no backlog; ping shown in game",
+ "notes": "Lobbies listed on every relay; clear message when the host is on an older version",
  "files": {
   "game.html": "97870228b260ca8dbc597aba06968c99fb7f91587b2ea6b164d53b96387108db",
   "mp-pre.js": "be8c9b0b37af841a223c29263f12c785422234671280bb92ddd6dfc8b14e9821",
   "mp-game.js": "81f6378aeb4d01b1ff059bbff9491066512d66f159b25a930b5237ea043f56db",
   "three.min.js": "dd5fa76b8ab5df86918e8d767ba6ba8529a5880f26c456d973635133b135ac7d",
-  "launcher.html": "89ab689e60a1df332af7de4500b4320919572694a4c0fdedf56265b4ab8183b4",
-  "net.js": "c42f7d64ff50d75863c768d7e4604bdfbeb60f4121d170046a2aaff59633264b",
+  "launcher.html": "f1f98341d44f36f06a7db7167d121468cf30802605e65d9c44788ec1c19d85ae",
+  "net.js": "dd1586937ec04bcc1ed953d0b5cd0b0dab3e2a7700e1b4e3868b5e8e1615cc12",
   "icon.png": "664488bb94d230960669db44babe2d98618a31c39c48410bbba5a671ed39ed1d",
   "hero.jpg": "01141d2db1b5af37c068d93bf6e68b5eb6d0ec946fad9cc64d6b2e23e01171e4"
  }

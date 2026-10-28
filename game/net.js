@@ -7,7 +7,7 @@
 (function () {
   const CFG = (window.ogr && ogr.cfg) || {};
   const LOCAL = /^wss?:\/\/127\.0\.0\.1/.test(CFG.signal || '');
-  const BROKERS = LOCAL ? [{ url: CFG.signal }] : [
+  const BROKERS = LOCAL ? CFG.signal.split(',').map(url => ({ url })) : [
     { url: 'wss://broker.emqx.io:8084/mqtt' },
     { url: 'wss://broker.hivemq.com:8884/mqtt' },
     { url: 'wss://public.cloud.shiftr.io', user: 'public', pass: 'public' },
@@ -111,7 +111,8 @@
     emit(k, ...a) { const f = this.ev[k]; if (f) try { f(...a); } catch (e) { console.error(e); } },
     profile: () => ({}),
     T(x) { return ROOT + this.code + '/' + x; },
-    send(topic, m, retain) { if (!this.mq) return; this.mq.pub(this.T(topic), m === '' ? '' : JSON.stringify(m), retain); },
+    send(topic, m, retain, via) { const q = via || this.mq; if (!q) return; q.pub(this.T(topic), m === '' ? '' : JSON.stringify(m), retain); },
+    sendAll(topic, m, retain) { for (const q of (this.mqs && this.mqs.length ? this.mqs : [this.mq])) if (q) this.send(topic, m, retain, q); },
     stat() { return { ms: this.rtt == null ? null : Math.round(this.rtt), via: this.role === 'host' ? 'host' : (dcOpen(this.link) ? 'direct' : 'relay') }; },
 
     // ---------------- host ----------------
@@ -120,9 +121,17 @@
       await iceServers();
       this.role = 'host'; this.me = 'p0'; this.peers = new Map(); this.inMatch = false;
       this.code = rnd(4);
-      this.mq = await anyBroker('ogr' + rnd(10), { topic: ROOT + this.code + '/lobby', msg: '', retain: true }, (t, s) => this._hostRx(t, s));
-      this.mq.onclose = () => { if (this.role === 'host') { this.emit('closed', 'Lost the connection to the online service. Create the lobby again.'); this.leave(true); } };
-      this.mq.sub(this.T('h')); this.mq.sub(this.T('a'));
+      // list the lobby on every relay we can reach, so friends whose network blocks one still find it
+      const will = { topic: ROOT + this.code + '/lobby', msg: '', retain: true }, cid = 'ogr' + rnd(10);
+      const tries = await Promise.allSettled(BROKERS.map(b => { let q; return mqtt(b, cid, will, (t, s) => this._hostRx(t, s, q), 6000).then(x => (q = x)); }));
+      this.mqs = tries.filter(r => r.status === 'fulfilled').map(r => r.value);
+      if (!this.mqs.length) { this.role = null; throw new Error('offline'); }
+      this.mq = this.mqs[0];
+      for (const q of this.mqs) {
+        q.sub(this.T('h')); q.sub(this.T('a'));
+        q.onclose = () => { if (this.role !== 'host') return; this.mqs = this.mqs.filter(x => x !== q); if (this.mq === q) this.mq = this.mqs[0] || null;
+          if (!this.mqs.length) { this.emit('closed', 'Lost the connection to the online service. Create the lobby again.'); this.leave(true); } };
+      }
       this.players = [{ id: 'p0', host: true, ...this.profile() }];
       this._lobby();
       this._hb = setInterval(() => this._sweep(), 3000);
@@ -130,20 +139,20 @@
       this._ns = setInterval(() => { if (!this.peers) return; let d = 0, r = 0; for (const P of this.peers.values()) if (P.info) dcOpen(P) ? d++ : r++; ogr.toGame({ from: 'net', d: { t: 'netstat', via: 'host', direct: d, relay: r } }); }, 2000);
       return this.code;
     },
-    _hostRx(t, s) {
+    _hostRx(t, s, mq) {
       if (!this.code || !s) return;
       let m; try { m = JSON.parse(s); } catch (e) { return; }
       const from = m.from; if (!from || from === 'p0') return;
       if (t === this.T('h')) {
         let P = this.peers.get(from);
         if (m.t === 'hello') {
-          if ((m.build | 0) !== BUILD) { this.send('c/' + from, { t: 'reject', why: (m.build | 0) < BUILD ? 'oldyou' : 'oldhost' }); return; }
-          if (this.inMatch) { this.send('c/' + from, { t: 'reject', why: 'match' }); return; }
-          if (!P && this.peers.size >= MAX - 1) { this.send('c/' + from, { t: 'reject', why: 'full' }); return; }
-          P = P || { id: from, q: mkQueue() }; P.seen = Date.now();
+          if ((m.build | 0) !== BUILD) { this.send('c/' + from, { t: 'reject', why: (m.build | 0) < BUILD ? 'oldyou' : 'oldhost' }, false, mq); return; }
+          if (this.inMatch) { this.send('c/' + from, { t: 'reject', why: 'match' }, false, mq); return; }
+          if (!P && this.peers.size >= MAX - 1) { this.send('c/' + from, { t: 'reject', why: 'full' }, false, mq); return; }
+          P = P || { id: from, q: mkQueue() }; P.seen = Date.now(); P.mq = mq;
           P.info = { id: from, name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 };
           this.peers.set(from, P);
-          this.send('c/' + from, { t: 'welcome', you: from, code: this.code });
+          this.send('c/' + from, { t: 'welcome', you: from, code: this.code }, false, mq);
           this._lobby();
           return;
         }
@@ -151,7 +160,7 @@
         P.seen = Date.now();
         if (m.t === 'prof') { Object.assign(P.info, { name: String(m.name || 'Player').slice(0, 24), skin: m.skin | 0, bb: m.bb | 0, gl: m.gl | 0, lvl: m.lvl | 0 }); this._lobby(); }
         else if (m.t === 'bye') this._drop(from);
-        else if (m.t === 'pi') this.send('c/' + from, { t: 'po', ts: m.ts });
+        else if (m.t === 'pi') this.send('c/' + from, { t: 'po', ts: m.ts }, false, P.mq);
         else if (m.t === 'B') this._hostBundle(P, m);
         else if (m.t === 'rtc') this._hostRtc(P, m);
         else if (m.t === 'ice') { if (P.pc && m.c) P.pc.addCand(m.c); }
@@ -163,14 +172,14 @@
     async _hostRtc(P, m) {
       try {
         if (P.pc) try { P.pc.close(); } catch (e) {}
-        const pc = P.pc = mkPC(x => this.send('c/' + P.id, x));
+        const pc = P.pc = mkPC(x => this.send('c/' + P.id, x, false, P.mq));
         pc.ondatachannel = e => {
           const c = e.channel; if (c.label === 'f') P.dcF = c; else P.dcR = c;
           c.onmessage = ev => { let b; try { b = JSON.parse(ev.data); } catch (x) { return; } P.seen = Date.now(); if (b.t === 'B') this._hostBundle(P, b); else if (b.t === 'pi') { try { P.dcR.send(JSON.stringify({ t: 'po', ts: b.ts })); } catch (x) {} } };
         };
         await pc.setRemoteDescription(m.sdp); pc.remoteReady();
         const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
-        this.send('c/' + P.id, { t: 'rtc', sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription });
+        this.send('c/' + P.id, { t: 'rtc', sdp: pc.localDescription.toJSON ? pc.localDescription.toJSON() : pc.localDescription }, false, P.mq);
       } catch (e) {}
     },
     _hostBundle(P, b) {
@@ -187,11 +196,11 @@
     _flushHost() {
       if (!this.peers) return;
       for (const P of this.peers.values()) {
-        const direct = dcOpen(P), { rel, fast } = qTake(P.q, direct ? P.dcF.bufferedAmount > 128 * 1024 : this.mq && this.mq.backed());
+        const direct = dcOpen(P), { rel, fast } = qTake(P.q, direct ? P.dcF.bufferedAmount > 128 * 1024 : P.mq && P.mq.backed());
         if (!rel.length && !fast.length) continue;
         if (direct) {
           try { if (rel.length) P.dcR.send(JSON.stringify({ t: 'B', l: rel })); if (fast.length) P.dcF.send(JSON.stringify({ t: 'B', l: fast })); } catch (e) {}
-        } else this.send('c/' + P.id, { t: 'B', l: [...rel, ...fast] });
+        } else this.send('c/' + P.id, { t: 'B', l: [...rel, ...fast] }, false, P.mq);
       }
     },
     _sweep() {
@@ -208,7 +217,7 @@
     _lobby() {
       if (this.role !== 'host') return;
       this.players = [{ id: 'p0', host: true, ...this.profile() }, ...[...this.peers.values()].filter(P => P.info).map(P => P.info)];
-      this.send('lobby', { t: 'lobby', code: this.code, players: this.players, inMatch: this.inMatch, build: BUILD, at: Date.now() }, true);
+      this.sendAll('lobby', { t: 'lobby', code: this.code, players: this.players, inMatch: this.inMatch, build: BUILD, at: Date.now() }, true);
       this.emit('lobby', this.players);
     },
     start() {
@@ -217,7 +226,7 @@
       const n = this.players.length;
       const info = { seed: (Math.random() * 4294967295) >>> 0, spawn: Math.random() * 5 | 0, busA: Math.random() * 6.283,
         bots: Math.max(5, 20 - n), players: this.players, hostId: 'p0', mid: rnd(6) };
-      this.send('a', { t: 'start', from: 'p0', info });
+      this.sendAll('a', { t: 'start', from: 'p0', info });
       this.inMatch = true; this._lobby();
       this.emit('start', { ...info, me: 'p0', host: true });
     },
@@ -239,7 +248,7 @@
       this.role = 'client'; this.code = code; this.me = 'c' + rnd(6);
       const me = this.me, cid = 'ogr' + rnd(10);
       const will = { topic: this.T('a'), msg: JSON.stringify({ t: 'g', from: me, d: { t: 'gone' } }) };
-      let lastErr = 'notfound', reachable = false;
+      let lastErr = 'notfound', reachable = false; this._oldSeen = false;
       for (const b of BROKERS) {
         if (this.role !== 'client' || this.me !== me) throw new Error('cancelled');
         let mq;
@@ -254,7 +263,7 @@
             else if (kind === 'reject') { clearTimeout(t2); resolve({ err: data }); }
             else if (kind === 'empty') { clearTimeout(t1); resolve({ err: 'notfound' }); }
           };
-          mq.sub(this.T('lobby'));
+          mq.sub(this.T('lobby')); mq.sub('ogroyale/v2/' + code + '/lobby');
         });
         this._clientWait = null;
         if (res.ok) {
@@ -269,8 +278,9 @@
         lastErr = res.err;
         if (res.err !== 'notfound') break;
       }
+      const old = this._oldSeen;
       this.leave(true);
-      throw new Error(reachable ? lastErr : 'offline');
+      throw new Error(!reachable ? 'offline' : (lastErr === 'notfound' && old) ? 'oldhost' : lastErr);
     },
     async _tryDirect() {
       try { if (localStorage.getItem('ogrNoDirect')) return; } catch (e) {}
@@ -301,6 +311,7 @@
       this.send('h', { t: 'B', from: this.me, l: [...rel, ...fast] });
     },
     _clientRx(t, s) {
+      if (/^ogroyale\/v2\//.test(t)) { if (s) this._oldSeen = true; return; }
       if (t === this.T('lobby')) {
         if (!s) { if (this._clientWait) this._clientWait('empty'); else if (this.role === 'client') { this.emit('closed', 'The host closed the lobby.'); ogr.toGame({ from: 'p0', d: { t: 'gone' } }); this.leave(true); } return; }
         let m; try { m = JSON.parse(s); } catch (e) { return; }
@@ -328,7 +339,7 @@
       if (!m || !m.d || !this.role) return;
       const fast = !!m.f && FAST.has(m.d.t);
       if (this.role === 'host') {
-        if (m.d.t === 'gone') { this.send('a', { t: 'g', from: 'p0', d: m.d }); }
+        if (m.d.t === 'gone') { this.sendAll('a', { t: 'g', from: 'p0', d: m.d }); }
         this._route('p0', m.d, fast);
       } else if (this.q) {
         if (m.d.t === 'gone') this.send('a', { t: 'g', from: this.me, d: m.d });
@@ -343,10 +354,11 @@
       if (this.link) { try { this.link.pc.close(); } catch (e) {} this.link = null; }
       if (this.mq) {
         try {
-          if (was === 'host') this.send('lobby', '', true);
+          if (was === 'host') this.sendAll('lobby', '', true);
           else if (was === 'client' && this.me) this.send('h', { t: 'bye', from: this.me });
         } catch (e) {}
-        const mq = this.mq; this.mq = null; mq.onclose = null; setTimeout(() => mq.close(), 200);
+        const all = [...new Set([this.mq, ...(this.mqs || [])])].filter(Boolean); this.mq = null; this.mqs = null;
+        all.forEach(q => { q.onclose = null; setTimeout(() => q.close(), 200); });
       }
       this.role = null; this.code = null; this.me = null; this.players = []; this.inMatch = false; this.peers = null; this._clientWait = null; this.q = null; this.rtt = null;
       if (was && !silent) this.emit('left');
