@@ -236,6 +236,8 @@ kbd{background:#1a2456;border:1px solid #2a377a;border-bottom-width:2px;border-r
       <div class="set">
         <div class="opt"><div class="t"><b>Launch in fullscreen</b><p>Start the game fullscreen. Press F11 in game to switch any time.</p></div><button class="sw" data-k="fullscreen"></button></div>
         <div class="opt"><div class="t"><b>Keep launcher open while playing</b><p>Otherwise the launcher hides and comes back when you close the game.</p></div><button class="sw" data-k="keepOpen"></button></div>
+        <div class="opt"><div class="t"><b>Graphics quality</b><p>Auto starts on High and lowers itself if your FPS drops. Low turns off shadows and draws less far away.</p></div><select class="inp" id="gfxSel" style="width:150px"><option value="auto">Auto</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></div>
+        <div class="opt"><div class="t"><b>Show FPS</b><p>Shows your frames per second and graphics level in the corner during a match.</p></div><button class="sw" data-k="fps"></button></div>
         <div class="opt"><div class="t"><b>Reset progress</b><p id="rtxt">Wipes your level, wins, items and balance on this PC. This can't be undone.</p></div><button class="btn" id="reset">Reset</button></div>
       </div>
     </section>
@@ -248,7 +250,7 @@ const $=id=>document.getElementById(id);
 const fmt=n=>Number(n||0).toLocaleString();
 const load=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
 let cfg=Object.assign({fullscreen:true,keepOpen:false},load('ogrLauncher',{}));
-const saveCfg=()=>{try{localStorage.setItem('ogrLauncher',JSON.stringify(cfg))}catch(e){}};
+const saveCfg=()=>{try{const cur=load('ogrLauncher',{}),keep=cur.gfxAuto,reset=cfg._ra;delete cfg._ra;delete cfg.gfxAuto;Object.assign(cur,cfg);cur.gfxAuto=reset?'high':keep;localStorage.setItem('ogrLauncher',JSON.stringify(cur))}catch(e){}};
 function toast(t){const el=$('toast');el.textContent=t;el.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>el.classList.remove('on'),1800)}
 
 function refresh(){
@@ -274,6 +276,8 @@ document.querySelectorAll('.sw').forEach(s=>{
   s.onclick=()=>{cfg[s.dataset.k]=!cfg[s.dataset.k];s.classList.toggle('on',cfg[s.dataset.k]);saveCfg()};
 });
 
+$('gfxSel').value=['auto','high','medium','low'].includes(cfg.gfx)?cfg.gfx:'auto';
+$('gfxSel').onchange=()=>{cfg.gfx=$('gfxSel').value;cfg._ra=true;saveCfg();toast('Graphics: '+$('gfxSel').selectedOptions[0].textContent)};
 let armed=false;
 $('reset').onclick=()=>{
   const b=$('reset');

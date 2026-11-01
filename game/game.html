@@ -2530,4 +2530,4 @@ function closeEdit(){if(ED)ED.p.cols.forEach(c=>c.m.visible=true);if(tileG){scen
 function cancelEdit(r){closeEdit();if(r!==false)relock()}
 function confirmEdit(){if(!ED)return;const p=ED.p;p.grid=ED.g;if(p.grid.every(v=>v)){placed.delete(p.k);PCS.splice(PCS.indexOf(p),1)}mkPiece(p);closeEdit()}
 MPX.unseed();render();requestAnimationFrame(lobbyLoop);
-</script><script src="mp-game.js"></script></body></html>
+</script><script src="mp-game.js"></script><script src="gfx.js"></script></body></html>
