@@ -1,11 +1,11 @@
 {
- "v": 8,
+ "v": 9,
  "shell": 1,
- "notes": "Rifle carry pose: guns are held across the body, snapping to aim when you shoot",
+ "notes": "Over-the-shoulder aiming: gun shouldered, closer camera",
  "files": {
-  "game.html": "bdcf0d0dcd3a17c0025e4622dd53da6d5e94c146c1c6bf63b9b078bca9a8ea8d",
+  "game.html": "2d7667895e0886c69924acd1d9b379b55ce70856238183039f981cc3c1fbd5a4",
   "mp-pre.js": "be8c9b0b37af841a223c29263f12c785422234671280bb92ddd6dfc8b14e9821",
-  "mp-game.js": "72281643c96b445b6689c84a2e06b73a642025ae3a30216a4eea535e6e95a149",
+  "mp-game.js": "a45fe43b8f783fb2712808eee6ea815489c6ab4c9ace6bb19d337b48dab0b423",
   "three.min.js": "dd5fa76b8ab5df86918e8d767ba6ba8529a5880f26c456d973635133b135ac7d",
   "launcher.html": "f1f98341d44f36f06a7db7167d121468cf30802605e65d9c44788ec1c19d85ae",
   "net.js": "dd1586937ec04bcc1ed953d0b5cd0b0dab3e2a7700e1b4e3868b5e8e1615cc12",

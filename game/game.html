@@ -1651,7 +1651,7 @@ function loop(now){requestAnimationFrame(loop);const rdt=Math.min(.05,(now-last)
  for(let i=fx.length-1;i>=0;i--){fx[i].t-=dt;if(fx[i].t<=0){scene.remove(fx[i].l);fx.splice(i,1)}}
  if(!dead&&!DRV){const tf=SCOPE?22:ADS?S.fov*.7:S.fov+(P.mode=='air'?10:P.mode=='glide'?6:(K.ShiftLeft&&(K.KeyW||K.KeyA||K.KeyS||K.KeyD)&&P.mode=='ground')?6:0)+(P.slide>0?8:0);if(Math.abs(cam.fov-tf)>.05){cam.fov+=(tf-cam.fov)*(ADS||SCOPE?.28:.1);cam.updateProjectionMatrix()}}
  const hd=new THREE.Vector3(P.x,P.y+(P.slide>0?1.05:1.8),P.z),dir=new THREE.Vector3(-Math.sin(yaw)*Math.cos(pitch),Math.sin(pitch),-Math.cos(yaw)*Math.cos(pitch)),rt=new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
- if(!dead&&DRV){hd.y+=1.2;cam.position.copy(hd).addScaledVector(dir,-10);cam.position.y=Math.max(cam.position.y,P.y+2.2);cam.lookAt(hd.clone().addScaledVector(dir,20))}else if(!dead&&P.mode=='bus'&&BUS){const bp=BUS.g.position;hd.set(bp.x,bp.y+2,bp.z);hd.y+=4;cam.position.copy(hd).addScaledVector(dir,-38);cam.position.y=Math.max(cam.position.y,bp.y-6);cam.lookAt(hd)}else if(!dead&&DRV){hd.y+=1.2;camPlace(hd,dir,rt,10,0);cam.position.y=Math.max(cam.position.y,P.y+1.6);cam.lookAt(hd.clone().addScaledVector(dir,20))}else if(!dead){const cd2=SCOPE?.15:ADS?2.05:4.5-wz,cs=SCOPE?0:ADS?.95:1.1;if(ADS)hd.y-=.12;camPlace(hd,dir,rt,cd2,cs);cam.lookAt(hd.clone().addScaledVector(dir,20).addScaledVector(rt,cs))}else specCam();
+ if(!dead&&DRV){hd.y+=1.2;cam.position.copy(hd).addScaledVector(dir,-10);cam.position.y=Math.max(cam.position.y,P.y+2.2);cam.lookAt(hd.clone().addScaledVector(dir,20))}else if(!dead&&P.mode=='bus'&&BUS){const bp=BUS.g.position;hd.set(bp.x,bp.y+2,bp.z);hd.y+=4;cam.position.copy(hd).addScaledVector(dir,-38);cam.position.y=Math.max(cam.position.y,bp.y-6);cam.lookAt(hd)}else if(!dead&&DRV){hd.y+=1.2;camPlace(hd,dir,rt,10,0);cam.position.y=Math.max(cam.position.y,P.y+1.6);cam.lookAt(hd.clone().addScaledVector(dir,20))}else if(!dead){const cd2=SCOPE?.15:ADS?1.6:4.5-wz,cs=SCOPE?0:ADS?1.08:1.1;if(ADS)hd.y-=.1;camPlace(hd,dir,rt,cd2,cs);cam.lookAt(hd.clone().addScaledVector(dir,20).addScaledVector(rt,cs))}else specCam();
  $('hp').firstChild.style.width=Math.max(0,P.hp)+'%';$('sh').firstChild.style.width=P.sh+'%';hud2();
  let nm='',nd=28;POI.forEach(p=>{const d=Math.hypot(P.x-p.x,P.z-p.z);if(d<nd){nd=d;nm=p.n}});$('loc').textContent=nm;
  const k=140/W,X=x=>(x+W/2)*k;mm.fillStyle='#2f6a28';mm.fillRect(0,0,140,140);mm.fillStyle='#3a8fe0';mm.beginPath();mm.arc(X(lk[0]),X(lk[1]),32*k,0,7);mm.fill();
@@ -2173,8 +2173,21 @@ function gunPose(o,aim,t){const g=(o.gun&&o.gun.userData.gun)?o.gun:o.aR.gunM;if
  _gm.makeBasis(_gD,_gU,_gX);g.quaternion.setFromRotationMatrix(_gm);g.position.copy(_gR).addScaledVector(_gD,-.03).addScaledVector(_gU,-.03);
  ik(o,0,_gR,_gH.set(1,-.6,-.4));ik(o,1,_gL,_gH.set(-1,-.55,-.15));return true}
 addEventListener('mousedown',e=>{if(e.button==0&&typeof pl!='undefined'&&pl)pl._aimT=T},true);
+// ---- aiming down sights: gun shouldered at the right shoulder, barrel following where you look ----
+const _aV=new THREE.Vector3(),_aW=new THREE.Vector3();
+function gunAim(o,p,t){const g=(o.gun&&o.gun.userData.gun)?o.gun:o.aR.gunM;if(!g||!g.parent)return false;
+ const ud=g.userData;if(!ud.home)ud.home={p:g.position.clone(),q:g.quaternion.clone()};
+ const par=o.aR.parent;if(g.parent!==par)par.add(g);
+ p=Math.max(-1.1,Math.min(1.1,p||0));
+ _gD.set(-.03,Math.sin(p),Math.cos(p)).normalize();                  // barrel follows the aim pitch
+ _gU.set(0,1,0);_gU.addScaledVector(_gD,-_gU.dot(_gD)).normalize();_aV.crossVectors(_gD,_gU);
+ _aW.set(.35,1.6,.12);                                               // stock at the outside of the right shoulder, sights near eye level
+ _gR.copy(_aW).addScaledVector(_gD,.3).addScaledVector(_gU,-.09);     // right hand on the grip
+ _gL.copy(_gR).addScaledVector(_gD,.3).addScaledVector(_gU,.02).addScaledVector(_aV,.02);  // left hand on the handguard
+ _gm.makeBasis(_gD,_gU,_aV);g.quaternion.setFromRotationMatrix(_gm);g.position.copy(_gR).addScaledVector(_gU,.02);
+ ik(o,0,_gR,_gH.set(.45,-1,.15));ik(o,1,_gL,_gH.set(-.6,-1,0));return true}
 function holdPose(){if(P.mode!='ground'||build||cons>0)return;const it=INV[sel-1];if(!it)return;
- if(it.t=='w'){if(down)pl._aimT=T;if(gunPose(pl,ADS||down||T-(pl._aimT==null?-9:pl._aimT)<.9,T))return;if(ADS){pl.aR.rotation.set(-1.62,0,-.12);pl.aR.el.rotation.x=0;pl.aL.rotation.set(-1.45,0,-.62);pl.aL.el.rotation.x=-.75}else{pl.aR.rotation.set(-1.45,0,.05);pl.aR.el.rotation.x=0;pl.aL.rotation.set(-1.2,0,-.4);pl.aL.el.rotation.x=-.55}}
+ if(it.t=='w'){if(down)pl._aimT=T;if(ADS&&gunAim(pl,pitch,T))return;if(gunPose(pl,ADS||down||T-(pl._aimT==null?-9:pl._aimT)<.9,T))return;if(ADS){pl.aR.rotation.set(-1.62,0,-.12);pl.aR.el.rotation.x=0;pl.aL.rotation.set(-1.45,0,-.62);pl.aL.el.rotation.x=-.75}else{pl.aR.rotation.set(-1.45,0,.05);pl.aR.el.rotation.x=0;pl.aL.rotation.set(-1.2,0,-.4);pl.aL.el.rotation.x=-.55}}
  else if(it.k=='px'){if(!down){pxHold(pl,pl.gun,null,T);return}pxFree(pl,pl.gun);pl.aR.el.rotation.x=0;if(down){const ph=(T*2)%1,a=ph<.4?-.5-1.9*(ph/.4):-2.4+2.2*Math.min(1,(ph-.4)/.18);pl.aR.rotation.set(a,0,.12);pl.aL.rotation.set(-.6,0,-.25);pl.aL.el.rotation.x=-.9}else{pl.aR.rotation.set(-.5,0,.1)}}}
 function hitmark(){const c=$('cross');c.classList.add('hit');clearTimeout(c.tm);c.tm=setTimeout(()=>c.classList.remove('hit'),120)}
 function feed(t){const d=document.createElement('span');d.textContent=t;$('feed').appendChild(d);setTimeout(()=>d.remove(),4000)}

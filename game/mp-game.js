@@ -183,7 +183,7 @@ function pupHuman(b, dt) {
       const md = s.m == 2 ? 'glide' : s.m == 1 ? 'sky' : s.j ? 'jump' : 'g';
       rj(o); anim(o, T, s.sp || 0, md);
       if (md == 'g' || md == 'jump') {
-        if (s.g && s.g != 'px' && s.g != 'b') { if (!(typeof gunPose == 'function' && gunPose(o, !!s.f, T))) { o.aR.rotation.set(-1.45, 0, .05); o.aR.el.rotation.x = 0; o.aL.rotation.set(-1.2, 0, -.4); o.aL.el.rotation.x = -.55; } }
+        if (s.g && s.g != 'px' && s.g != 'b') { if (s.ad && typeof gunAim == 'function' && gunAim(o, s.p || 0, T)) {} else if (!(typeof gunPose == 'function' && gunPose(o, !!s.f, T))) { o.aR.rotation.set(-1.45, 0, .05); o.aR.el.rotation.x = 0; o.aL.rotation.set(-1.2, 0, -.4); o.aL.el.rotation.x = -.55; } }
         else if (s.g == 'px' && b.gun) { try { pxHold(o, b.gun, s.px | 0, T); } catch (e) {} }
       } else if (b.gun && s.g == 'px') { try { pxFree(o, b.gun); } catch (e) {} }
     }
@@ -237,7 +237,7 @@ function myState() {
     m: P.mode == 'bus' ? 0 : P.mode == 'air' ? 1 : P.mode == 'glide' ? 2 : 3,
     sp: mv ? (K.ShiftLeft ? 1 : .72) : 0, j: (!P.grounded && P.vy > 1.5 || P.vy < -4) ? 1 : 0,
     e: emoNow, g, hp: Math.max(0, Math.round(P.hp)), sc: Math.round(P.sc || 0), d: dead ? 1 : 0,
-    gl: S.gl | 0, px: S.px | 0, f: (ADS || down || T - (pl && pl._aimT != null ? pl._aimT : -9) < .9) ? 1 : 0 };
+    gl: S.gl | 0, px: S.px | 0, f: (ADS || down || T - (pl && pl._aimT != null ? pl._aimT : -9) < .9) ? 1 : 0, ad: ADS ? 1 : 0, p: Math.round(pitch * 100) / 100 };
   if (drv) { s.dv = 1; s.cx = r2(CAR.x); s.cy = r2(CAR.y); s.cz = r2(CAR.z); s.ch = r3(CAR.h); s.ck = CAR.k | 0; }
   return s;
 }
